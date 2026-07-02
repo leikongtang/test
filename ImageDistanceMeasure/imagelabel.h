@@ -22,8 +22,12 @@ public:
     double zoomFactor() const;
     void setPanMode(bool enabled);
     bool panMode() const;
-    void setMarkersVisible(bool visible);
-    bool markersVisible() const;
+    void setPoint1Visible(bool visible);
+    void setPoint2Visible(bool visible);
+    void setLineVisible(bool visible);
+    bool point1Visible() const;
+    bool point2Visible() const;
+    bool lineVisible() const;
 
 signals:
     void pointsChanged(const QVector<QPoint> &imagePoints, double pixelDistance);
@@ -51,7 +55,9 @@ private:
     double m_zoomFactor;
     QPoint m_panOffset;
     bool m_panMode;
-    bool m_markersVisible;
+    bool m_point1Visible;
+    bool m_point2Visible;
+    bool m_lineVisible;
     bool m_panning;
     QPoint m_lastPanPos;
 

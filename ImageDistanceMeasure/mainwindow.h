@@ -22,7 +22,9 @@ private slots:
     void onZoomOutClicked();
     void onZoomResetClicked();
     void onPanModeToggled(bool checked);
-    void onHideMarkersToggled(bool checked);
+    void onHidePoint1Toggled(bool checked);
+    void onHidePoint2Toggled(bool checked);
+    void onHideLineToggled(bool checked);
     void onZoomFactorChanged(double factor);
     void onPointsChanged(const QVector<QPoint> &imagePoints, double pixelDistance);
     void onCalibrationChanged(double value);
@@ -31,6 +33,7 @@ private:
     double pixelPrecision() const;
     void updateDistanceDisplay();
     void updatePrecisionDisplay();
+    void updateHideButtonText(QPushButton *button, bool hidden, const QString &name);
 
     ImageLabel *m_imageLabel;
     QPushButton *m_selectImageButton;
@@ -39,7 +42,9 @@ private:
     QPushButton *m_zoomOutButton;
     QPushButton *m_zoomResetButton;
     QPushButton *m_panModeButton;
-    QPushButton *m_hideMarkersButton;
+    QPushButton *m_hidePoint1Button;
+    QPushButton *m_hidePoint2Button;
+    QPushButton *m_hideLineButton;
     QLabel *m_fileNameLabel;
     QLabel *m_zoomLabel;
     QLabel *m_point1Label;

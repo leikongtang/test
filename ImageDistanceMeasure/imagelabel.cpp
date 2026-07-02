@@ -10,7 +10,9 @@ ImageLabel::ImageLabel(QWidget *parent)
     , m_pixelDistance(0.0)
     , m_zoomFactor(1.0)
     , m_panMode(false)
-    , m_markersVisible(true)
+    , m_point1Visible(true)
+    , m_point2Visible(true)
+    , m_lineVisible(true)
     , m_panning(false)
 {
     setAlignment(Qt::AlignCenter);
@@ -87,19 +89,49 @@ bool ImageLabel::panMode() const
     return m_panMode;
 }
 
-void ImageLabel::setMarkersVisible(bool visible)
+void ImageLabel::setPoint1Visible(bool visible)
 {
-    if (m_markersVisible == visible) {
+    if (m_point1Visible == visible) {
         return;
     }
 
-    m_markersVisible = visible;
+    m_point1Visible = visible;
     update();
 }
 
-bool ImageLabel::markersVisible() const
+void ImageLabel::setPoint2Visible(bool visible)
 {
-    return m_markersVisible;
+    if (m_point2Visible == visible) {
+        return;
+    }
+
+    m_point2Visible = visible;
+    update();
+}
+
+void ImageLabel::setLineVisible(bool visible)
+{
+    if (m_lineVisible == visible) {
+        return;
+    }
+
+    m_lineVisible = visible;
+    update();
+}
+
+bool ImageLabel::point1Visible() const
+{
+    return m_point1Visible;
+}
+
+bool ImageLabel::point2Visible() const
+{
+    return m_point2Visible;
+}
+
+bool ImageLabel::lineVisible() const
+{
+    return m_lineVisible;
 }
 
 void ImageLabel::mousePressEvent(QMouseEvent *event)
@@ -199,9 +231,23 @@ void ImageLabel::paintEvent(QPaintEvent *event)
     const QRectF drawRect = imageRect();
     painter.drawPixmap(drawRect.toRect(), m_originalPixmap, m_originalPixmap.rect());
 
-    if (m_imagePoints.isEmpty() || !m_markersVisible) {
+    if (m_imagePoints.isEmpty()) {
         QLabel::paintEvent(event);
         return;
+    }
+
+    QVector<QPoint> widgetPoints;
+    widgetPoints.reserve(m_imagePoints.size());
+    for (const QPoint &imagePoint : m_imagePoints) {
+        widgetPoints.append(imageToWidget(imagePoint));
+    }
+
+    if (widgetPoints.size() >= 2 && m_lineVisible) {
+        QPen linePen(QColor(0, 200, 255));
+        linePen.setWidth(2);
+        linePen.setStyle(Qt::DashLine);
+        painter.setPen(linePen);
+        painter.drawLine(widgetPoints.at(0), widgetPoints.at(1));
     }
 
     QPen pointPen(Qt::red);
@@ -209,20 +255,12 @@ void ImageLabel::paintEvent(QPaintEvent *event)
     painter.setPen(pointPen);
     painter.setBrush(Qt::red);
 
-    QVector<QPoint> widgetPoints;
-    widgetPoints.reserve(m_imagePoints.size());
-    for (const QPoint &imagePoint : m_imagePoints) {
-        const QPoint widgetPoint = imageToWidget(imagePoint);
-        widgetPoints.append(widgetPoint);
-        painter.drawEllipse(widgetPoint, 5, 5);
+    if (widgetPoints.size() >= 1 && m_point1Visible) {
+        painter.drawEllipse(widgetPoints.at(0), 5, 5);
     }
 
-    if (widgetPoints.size() == 2) {
-        QPen linePen(QColor(0, 200, 255));
-        linePen.setWidth(2);
-        linePen.setStyle(Qt::DashLine);
-        painter.setPen(linePen);
-        painter.drawLine(widgetPoints.at(0), widgetPoints.at(1));
+    if (widgetPoints.size() >= 2 && m_point2Visible) {
+        painter.drawEllipse(widgetPoints.at(1), 5, 5);
     }
 
     QLabel::paintEvent(event);

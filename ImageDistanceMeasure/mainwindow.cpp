@@ -30,9 +30,15 @@ MainWindow::MainWindow(QWidget *parent)
     m_panModeButton = new QPushButton(QStringLiteral("移动图片"), this);
     m_panModeButton->setCheckable(true);
     m_panModeButton->setToolTip(QStringLiteral("开启后可用左键拖拽移动图片"));
-    m_hideMarkersButton = new QPushButton(QStringLiteral("隐藏标点"), this);
-    m_hideMarkersButton->setCheckable(true);
-    m_hideMarkersButton->setToolTip(QStringLiteral("隐藏或显示图片上的选点标记和连线"));
+    m_hidePoint1Button = new QPushButton(QStringLiteral("隐藏点1"), this);
+    m_hidePoint1Button->setCheckable(true);
+    m_hidePoint1Button->setToolTip(QStringLiteral("隐藏或显示第一个选点"));
+    m_hidePoint2Button = new QPushButton(QStringLiteral("隐藏点2"), this);
+    m_hidePoint2Button->setCheckable(true);
+    m_hidePoint2Button->setToolTip(QStringLiteral("隐藏或显示第二个选点"));
+    m_hideLineButton = new QPushButton(QStringLiteral("隐藏线段"), this);
+    m_hideLineButton->setCheckable(true);
+    m_hideLineButton->setToolTip(QStringLiteral("隐藏或显示两点之间的连线"));
     m_fileNameLabel = new QLabel(QStringLiteral("未选择文件"), this);
     m_zoomLabel = new QLabel(QStringLiteral("缩放: 100%"), this);
 
@@ -42,7 +48,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_zoomOutButton, &QPushButton::clicked, this, &MainWindow::onZoomOutClicked);
     connect(m_zoomResetButton, &QPushButton::clicked, this, &MainWindow::onZoomResetClicked);
     connect(m_panModeButton, &QPushButton::toggled, this, &MainWindow::onPanModeToggled);
-    connect(m_hideMarkersButton, &QPushButton::toggled, this, &MainWindow::onHideMarkersToggled);
+    connect(m_hidePoint1Button, &QPushButton::toggled, this, &MainWindow::onHidePoint1Toggled);
+    connect(m_hidePoint2Button, &QPushButton::toggled, this, &MainWindow::onHidePoint2Toggled);
+    connect(m_hideLineButton, &QPushButton::toggled, this, &MainWindow::onHideLineToggled);
 
     toolLayout->addWidget(m_selectImageButton);
     toolLayout->addWidget(m_clearPointsButton);
@@ -50,7 +58,9 @@ MainWindow::MainWindow(QWidget *parent)
     toolLayout->addWidget(m_zoomOutButton);
     toolLayout->addWidget(m_zoomResetButton);
     toolLayout->addWidget(m_panModeButton);
-    toolLayout->addWidget(m_hideMarkersButton);
+    toolLayout->addWidget(m_hidePoint1Button);
+    toolLayout->addWidget(m_hidePoint2Button);
+    toolLayout->addWidget(m_hideLineButton);
     toolLayout->addWidget(m_zoomLabel);
     toolLayout->addWidget(m_fileNameLabel, 1);
 
@@ -162,10 +172,27 @@ void MainWindow::onPanModeToggled(bool checked)
     m_imageLabel->setPanMode(checked);
 }
 
-void MainWindow::onHideMarkersToggled(bool checked)
+void MainWindow::onHidePoint1Toggled(bool checked)
 {
-    m_imageLabel->setMarkersVisible(!checked);
-    m_hideMarkersButton->setText(checked ? QStringLiteral("显示标点") : QStringLiteral("隐藏标点"));
+    m_imageLabel->setPoint1Visible(!checked);
+    updateHideButtonText(m_hidePoint1Button, checked, QStringLiteral("点1"));
+}
+
+void MainWindow::onHidePoint2Toggled(bool checked)
+{
+    m_imageLabel->setPoint2Visible(!checked);
+    updateHideButtonText(m_hidePoint2Button, checked, QStringLiteral("点2"));
+}
+
+void MainWindow::onHideLineToggled(bool checked)
+{
+    m_imageLabel->setLineVisible(!checked);
+    updateHideButtonText(m_hideLineButton, checked, QStringLiteral("线段"));
+}
+
+void MainWindow::updateHideButtonText(QPushButton *button, bool hidden, const QString &name)
+{
+    button->setText(hidden ? QStringLiteral("显示%1").arg(name) : QStringLiteral("隐藏%1").arg(name));
 }
 
 void MainWindow::onZoomFactorChanged(double factor)

@@ -1,0 +1,17 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# Qt
+*.pro.user
+build-*/
+release/
+debug/
+Makefile*
+*.obj
+*.exe
+moc_*
+ui_*
+qrc_*

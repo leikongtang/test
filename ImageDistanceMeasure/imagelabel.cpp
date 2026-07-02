@@ -9,6 +9,8 @@ ImageLabel::ImageLabel(QWidget *parent)
     : QLabel(parent)
     , m_pixelDistance(0.0)
     , m_zoomFactor(1.0)
+    , m_panMode(false)
+    , m_markersVisible(true)
     , m_panning(false)
 {
     setAlignment(Qt::AlignCenter);
@@ -64,6 +66,42 @@ double ImageLabel::zoomFactor() const
     return m_zoomFactor;
 }
 
+void ImageLabel::setPanMode(bool enabled)
+{
+    if (m_panMode == enabled) {
+        return;
+    }
+
+    m_panMode = enabled;
+    if (m_panMode) {
+        setCursor(Qt::OpenHandCursor);
+    } else if (!m_panning) {
+        unsetCursor();
+    }
+
+    emit panModeChanged(m_panMode);
+}
+
+bool ImageLabel::panMode() const
+{
+    return m_panMode;
+}
+
+void ImageLabel::setMarkersVisible(bool visible)
+{
+    if (m_markersVisible == visible) {
+        return;
+    }
+
+    m_markersVisible = visible;
+    update();
+}
+
+bool ImageLabel::markersVisible() const
+{
+    return m_markersVisible;
+}
+
 void ImageLabel::mousePressEvent(QMouseEvent *event)
 {
     if (m_originalPixmap.isNull()) {
@@ -71,14 +109,16 @@ void ImageLabel::mousePressEvent(QMouseEvent *event)
         return;
     }
 
-    if (event->button() == Qt::MiddleButton) {
+    if (event->button() == Qt::MiddleButton
+        || event->button() == Qt::RightButton
+        || (m_panMode && event->button() == Qt::LeftButton)) {
         m_panning = true;
         m_lastPanPos = event->pos();
         setCursor(Qt::ClosedHandCursor);
         return;
     }
 
-    if (event->button() != Qt::LeftButton) {
+    if (event->button() != Qt::LeftButton || m_panMode) {
         QLabel::mousePressEvent(event);
         return;
     }
@@ -111,9 +151,15 @@ void ImageLabel::mouseMoveEvent(QMouseEvent *event)
 
 void ImageLabel::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::MiddleButton && m_panning) {
+    if (m_panning && (event->button() == Qt::LeftButton
+                      || event->button() == Qt::MiddleButton
+                      || event->button() == Qt::RightButton)) {
         m_panning = false;
-        unsetCursor();
+        if (m_panMode) {
+            setCursor(Qt::OpenHandCursor);
+        } else {
+            unsetCursor();
+        }
         return;
     }
 
@@ -145,7 +191,7 @@ void ImageLabel::paintEvent(QPaintEvent *event)
     if (m_originalPixmap.isNull()) {
         painter.setPen(Qt::white);
         painter.drawText(rect(), Qt::AlignCenter,
-                         QStringLiteral("请先选择图片，然后在图片上点击两个点\n滚轮缩放，中键拖拽平移"));
+                         QStringLiteral("请先选择图片，然后在图片上点击两个点\n滚轮缩放，右键/中键拖拽平移，或开启移动模式"));
         QLabel::paintEvent(event);
         return;
     }
@@ -153,7 +199,7 @@ void ImageLabel::paintEvent(QPaintEvent *event)
     const QRectF drawRect = imageRect();
     painter.drawPixmap(drawRect.toRect(), m_originalPixmap, m_originalPixmap.rect());
 
-    if (m_imagePoints.isEmpty()) {
+    if (m_imagePoints.isEmpty() || !m_markersVisible) {
         QLabel::paintEvent(event);
         return;
     }

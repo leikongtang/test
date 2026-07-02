@@ -20,10 +20,15 @@ public:
     void zoomOut();
     void zoomReset();
     double zoomFactor() const;
+    void setPanMode(bool enabled);
+    bool panMode() const;
+    void setMarkersVisible(bool visible);
+    bool markersVisible() const;
 
 signals:
     void pointsChanged(const QVector<QPoint> &imagePoints, double pixelDistance);
     void zoomFactorChanged(double factor);
+    void panModeChanged(bool enabled);
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;
@@ -45,6 +50,8 @@ private:
     double m_pixelDistance;
     double m_zoomFactor;
     QPoint m_panOffset;
+    bool m_panMode;
+    bool m_markersVisible;
     bool m_panning;
     QPoint m_lastPanPos;
 

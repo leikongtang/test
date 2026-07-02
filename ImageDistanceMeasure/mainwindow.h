@@ -4,6 +4,7 @@
 #include <QMainWindow>
 
 class ImageLabel;
+class QCheckBox;
 class QDoubleSpinBox;
 class QLabel;
 class QPushButton;
@@ -25,6 +26,8 @@ private slots:
     void onHidePoint1Toggled(bool checked);
     void onHidePoint2Toggled(bool checked);
     void onHideLineToggled(bool checked);
+    void onGuideLinesToggled(bool checked);
+    void onGuideLineAngleChanged(double value);
     void onZoomFactorChanged(double factor);
     void onPointsChanged(const QVector<QPoint> &imagePoints, double pixelDistance);
     void onCalibrationChanged(double value);
@@ -34,6 +37,7 @@ private:
     void updateDistanceDisplay();
     void updatePrecisionDisplay();
     void updateHideButtonText(QPushButton *button, bool hidden, const QString &name);
+    void updateGuideLineControls(const QVector<QPoint> &imagePoints);
 
     ImageLabel *m_imageLabel;
     QPushButton *m_selectImageButton;
@@ -45,6 +49,9 @@ private:
     QPushButton *m_hidePoint1Button;
     QPushButton *m_hidePoint2Button;
     QPushButton *m_hideLineButton;
+    QCheckBox *m_guideLinesCheckBox;
+    QDoubleSpinBox *m_guideLineAngleSpinBox;
+    QLabel *m_pointsLockLabel;
     QLabel *m_fileNameLabel;
     QLabel *m_zoomLabel;
     QLabel *m_point1Label;

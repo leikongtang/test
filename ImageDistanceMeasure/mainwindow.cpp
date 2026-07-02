@@ -2,6 +2,7 @@
 
 #include "imagelabel.h"
 
+#include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -117,6 +118,33 @@ MainWindow::MainWindow(QWidget *parent)
 
     mainLayout->addLayout(toolLayout);
     mainLayout->addWidget(m_imageLabel, 1);
+
+    QHBoxLayout *guideLayout = new QHBoxLayout();
+    m_guideLinesCheckBox = new QCheckBox(QStringLiteral("垂直辅助线"), this);
+    m_guideLinesCheckBox->setToolTip(QStringLiteral("选中两点后可显示过两点的平行辅助线"));
+    connect(m_guideLinesCheckBox, &QCheckBox::toggled, this, &MainWindow::onGuideLinesToggled);
+
+    QLabel *guideAngleLabel = new QLabel(QStringLiteral("辅助线角度:"), this);
+    m_guideLineAngleSpinBox = new QDoubleSpinBox(this);
+    m_guideLineAngleSpinBox->setDecimals(1);
+    m_guideLineAngleSpinBox->setRange(0.0, 360.0);
+    m_guideLineAngleSpinBox->setWrapping(true);
+    m_guideLineAngleSpinBox->setSuffix(QStringLiteral(" °"));
+    m_guideLineAngleSpinBox->setEnabled(false);
+    m_guideLineAngleSpinBox->setToolTip(QStringLiteral("0° 为竖直方向，可旋转辅助线"));
+    connect(m_guideLineAngleSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onGuideLineAngleChanged);
+
+    m_pointsLockLabel = new QLabel(QStringLiteral(""), this);
+    m_pointsLockLabel->setStyleSheet(QStringLiteral("color: #ff9800;"));
+
+    guideLayout->addWidget(m_guideLinesCheckBox);
+    guideLayout->addWidget(guideAngleLabel);
+    guideLayout->addWidget(m_guideLineAngleSpinBox);
+    guideLayout->addWidget(m_pointsLockLabel);
+    guideLayout->addStretch();
+    mainLayout->addLayout(guideLayout);
+
     mainLayout->addLayout(infoLayout);
     mainLayout->addLayout(precisionLayout);
 
@@ -190,6 +218,26 @@ void MainWindow::onHideLineToggled(bool checked)
     updateHideButtonText(m_hideLineButton, checked, QStringLiteral("线段"));
 }
 
+void MainWindow::onGuideLinesToggled(bool checked)
+{
+    m_imageLabel->setGuideLinesEnabled(checked);
+    updateGuideLineControls(m_imageLabel->imagePoints());
+}
+
+void MainWindow::onGuideLineAngleChanged(double value)
+{
+    m_imageLabel->setGuideLineAngle(value);
+}
+
+void MainWindow::updateGuideLineControls(const QVector<QPoint> &imagePoints)
+{
+    const bool hasTwoPoints = imagePoints.size() >= 2;
+    m_guideLineAngleSpinBox->setEnabled(m_guideLinesCheckBox->isChecked() && hasTwoPoints);
+    m_pointsLockLabel->setText(hasTwoPoints
+        ? QStringLiteral("选点已锁定，请点击「清除选点」后重新选择")
+        : QString());
+}
+
 void MainWindow::updateHideButtonText(QPushButton *button, bool hidden, const QString &name)
 {
     button->setText(hidden ? QStringLiteral("显示%1").arg(name) : QStringLiteral("隐藏%1").arg(name));
@@ -220,6 +268,7 @@ void MainWindow::onPointsChanged(const QVector<QPoint> &imagePoints, double pixe
         m_point2Label->setText(QStringLiteral("点2像素: 未选择"));
     }
 
+    updateGuideLineControls(imagePoints);
     updateDistanceDisplay();
 }
 

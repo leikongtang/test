@@ -28,6 +28,11 @@ public:
     bool point1Visible() const;
     bool point2Visible() const;
     bool lineVisible() const;
+    void setGuideLinesEnabled(bool enabled);
+    bool guideLinesEnabled() const;
+    void setGuideLineAngle(double degrees);
+    double guideLineAngle() const;
+    bool pointsLocked() const;
 
 signals:
     void pointsChanged(const QVector<QPoint> &imagePoints, double pixelDistance);
@@ -45,6 +50,7 @@ private:
     QRectF imageRect() const;
     QPoint widgetToImage(const QPoint &widgetPoint) const;
     QPoint imageToWidget(const QPoint &imagePoint) const;
+    void drawGuideLine(QPainter &painter, const QPoint &imagePoint) const;
     void updateDistance();
     void setZoomFactorAt(double factor, const QPoint &anchor);
     void emitZoomFactorChanged();
@@ -58,6 +64,8 @@ private:
     bool m_point1Visible;
     bool m_point2Visible;
     bool m_lineVisible;
+    bool m_guideLinesEnabled;
+    double m_guideLineAngle;
     bool m_panning;
     QPoint m_lastPanPos;
 

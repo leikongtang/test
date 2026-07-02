@@ -5,6 +5,7 @@
 #include <QWheelEvent>
 #include <QFontMetrics>
 #include <QtMath>
+#include <cmath>
 
 ImageLabel::ImageLabel(QWidget *parent)
     : QLabel(parent)
@@ -14,6 +15,8 @@ ImageLabel::ImageLabel(QWidget *parent)
     , m_point1Visible(true)
     , m_point2Visible(true)
     , m_lineVisible(true)
+    , m_guideLinesEnabled(false)
+    , m_guideLineAngle(0.0)
     , m_panning(false)
 {
     setAlignment(Qt::AlignCenter);
@@ -135,6 +138,43 @@ bool ImageLabel::lineVisible() const
     return m_lineVisible;
 }
 
+void ImageLabel::setGuideLinesEnabled(bool enabled)
+{
+    if (m_guideLinesEnabled == enabled) {
+        return;
+    }
+
+    m_guideLinesEnabled = enabled;
+    update();
+}
+
+bool ImageLabel::guideLinesEnabled() const
+{
+    return m_guideLinesEnabled;
+}
+
+void ImageLabel::setGuideLineAngle(double degrees)
+{
+    const double normalized = std::fmod(degrees, 360.0);
+    const double angle = normalized < 0.0 ? normalized + 360.0 : normalized;
+    if (qFuzzyCompare(angle, m_guideLineAngle)) {
+        return;
+    }
+
+    m_guideLineAngle = angle;
+    update();
+}
+
+double ImageLabel::guideLineAngle() const
+{
+    return m_guideLineAngle;
+}
+
+bool ImageLabel::pointsLocked() const
+{
+    return m_imagePoints.size() >= 2;
+}
+
 void ImageLabel::mousePressEvent(QMouseEvent *event)
 {
     if (m_originalPixmap.isNull()) {
@@ -162,7 +202,7 @@ void ImageLabel::mousePressEvent(QMouseEvent *event)
     }
 
     if (m_imagePoints.size() >= 2) {
-        m_imagePoints.clear();
+        return;
     }
 
     m_imagePoints.append(imagePoint);
@@ -251,6 +291,15 @@ void ImageLabel::paintEvent(QPaintEvent *event)
         painter.drawLine(widgetPoints.at(0), widgetPoints.at(1));
     }
 
+    if (widgetPoints.size() >= 2 && m_guideLinesEnabled) {
+        QPen guidePen(QColor(255, 180, 0));
+        guidePen.setWidth(1);
+        guidePen.setStyle(Qt::DashDotLine);
+        painter.setPen(guidePen);
+        drawGuideLine(painter, m_imagePoints.at(0));
+        drawGuideLine(painter, m_imagePoints.at(1));
+    }
+
     QPen pointPen(Qt::red);
     pointPen.setWidth(2);
     painter.setPen(pointPen);
@@ -325,6 +374,32 @@ QPoint ImageLabel::imageToWidget(const QPoint &imagePoint) const
     const int widgetX = qRound(drawRect.left() + imagePoint.x() * drawRect.width() / m_originalPixmap.width());
     const int widgetY = qRound(drawRect.top() + imagePoint.y() * drawRect.height() / m_originalPixmap.height());
     return QPoint(widgetX, widgetY);
+}
+
+void ImageLabel::drawGuideLine(QPainter &painter, const QPoint &imagePoint) const
+{
+    const double radians = qDegreesToRadians(m_guideLineAngle);
+    const double dirX = qSin(radians);
+    const double dirY = qCos(radians);
+    const double maxLength = qSqrt(
+        static_cast<double>(m_originalPixmap.width() * m_originalPixmap.width()
+                            + m_originalPixmap.height() * m_originalPixmap.height()));
+
+    const QPointF startImage(
+        imagePoint.x() - dirX * maxLength,
+        imagePoint.y() - dirY * maxLength);
+    const QPointF endImage(
+        imagePoint.x() + dirX * maxLength,
+        imagePoint.y() + dirY * maxLength);
+
+    const QRectF drawRect = imageRect();
+    const auto toWidget = [&drawRect, this](const QPointF &point) {
+        return QPointF(
+            drawRect.left() + point.x() * drawRect.width() / m_originalPixmap.width(),
+            drawRect.top() + point.y() * drawRect.height() / m_originalPixmap.height());
+    };
+
+    painter.drawLine(toWidget(startImage), toWidget(endImage));
 }
 
 void ImageLabel::updateDistance()

@@ -3,12 +3,14 @@
 #include "imagelabel.h"
 
 #include <QCheckBox>
+#include <QColorDialog>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -68,6 +70,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_imageLabel = new ImageLabel(this);
     connect(m_imageLabel, &ImageLabel::pointsChanged, this, &MainWindow::onPointsChanged);
     connect(m_imageLabel, &ImageLabel::zoomFactorChanged, this, &MainWindow::onZoomFactorChanged);
+    connect(m_imageLabel, &ImageLabel::guideLineAngle1Changed, this, &MainWindow::onGuideLineAngle1Updated);
+    connect(m_imageLabel, &ImageLabel::guideLineAngle2Changed, this, &MainWindow::onGuideLineAngle2Updated);
 
     QHBoxLayout *infoLayout = new QHBoxLayout();
     m_point1Label = new QLabel(QStringLiteral("点1像素: 未选择"), this);
@@ -121,29 +125,89 @@ MainWindow::MainWindow(QWidget *parent)
 
     QHBoxLayout *guideLayout = new QHBoxLayout();
     m_guideLinesCheckBox = new QCheckBox(QStringLiteral("垂直辅助线"), this);
-    m_guideLinesCheckBox->setToolTip(QStringLiteral("选中两点后可显示过两点的平行辅助线"));
+    m_guideLinesCheckBox->setToolTip(QStringLiteral("选中两点后可显示过两点的辅助线"));
     connect(m_guideLinesCheckBox, &QCheckBox::toggled, this, &MainWindow::onGuideLinesToggled);
 
-    QLabel *guideAngleLabel = new QLabel(QStringLiteral("辅助线角度:"), this);
-    m_guideLineAngleSpinBox = new QDoubleSpinBox(this);
-    m_guideLineAngleSpinBox->setDecimals(1);
-    m_guideLineAngleSpinBox->setRange(0.0, 360.0);
-    m_guideLineAngleSpinBox->setWrapping(true);
-    m_guideLineAngleSpinBox->setSuffix(QStringLiteral(" °"));
-    m_guideLineAngleSpinBox->setEnabled(false);
-    m_guideLineAngleSpinBox->setToolTip(QStringLiteral("0° 为竖直方向，可旋转辅助线"));
-    connect(m_guideLineAngleSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &MainWindow::onGuideLineAngleChanged);
+    QLabel *guideAngle1Label = new QLabel(QStringLiteral("点1角度:"), this);
+    m_guideLineAngle1SpinBox = new QDoubleSpinBox(this);
+    m_guideLineAngle1SpinBox->setDecimals(1);
+    m_guideLineAngle1SpinBox->setRange(0.0, 360.0);
+    m_guideLineAngle1SpinBox->setWrapping(true);
+    m_guideLineAngle1SpinBox->setSuffix(QStringLiteral(" °"));
+    m_guideLineAngle1SpinBox->setEnabled(false);
+    connect(m_guideLineAngle1SpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onGuideLineAngle1Changed);
+
+    m_wheelAdjustGuide1Button = new QPushButton(QStringLiteral("滚轮调点1"), this);
+    m_wheelAdjustGuide1Button->setCheckable(true);
+    m_wheelAdjustGuide1Button->setEnabled(false);
+    m_wheelAdjustGuide1Button->setToolTip(QStringLiteral("开启后在图片上滚轮调整点1辅助线角度"));
+    connect(m_wheelAdjustGuide1Button, &QPushButton::toggled, this, &MainWindow::onWheelAdjustGuide1Toggled);
+
+    QLabel *guideAngle2Label = new QLabel(QStringLiteral("点2角度:"), this);
+    m_guideLineAngle2SpinBox = new QDoubleSpinBox(this);
+    m_guideLineAngle2SpinBox->setDecimals(1);
+    m_guideLineAngle2SpinBox->setRange(0.0, 360.0);
+    m_guideLineAngle2SpinBox->setWrapping(true);
+    m_guideLineAngle2SpinBox->setSuffix(QStringLiteral(" °"));
+    m_guideLineAngle2SpinBox->setEnabled(false);
+    connect(m_guideLineAngle2SpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onGuideLineAngle2Changed);
+
+    m_wheelAdjustGuide2Button = new QPushButton(QStringLiteral("滚轮调点2"), this);
+    m_wheelAdjustGuide2Button->setCheckable(true);
+    m_wheelAdjustGuide2Button->setEnabled(false);
+    m_wheelAdjustGuide2Button->setToolTip(QStringLiteral("开启后在图片上滚轮调整点2辅助线角度"));
+    connect(m_wheelAdjustGuide2Button, &QPushButton::toggled, this, &MainWindow::onWheelAdjustGuide2Toggled);
 
     m_pointsLockLabel = new QLabel(QStringLiteral(""), this);
     m_pointsLockLabel->setStyleSheet(QStringLiteral("color: #ff9800;"));
 
     guideLayout->addWidget(m_guideLinesCheckBox);
-    guideLayout->addWidget(guideAngleLabel);
-    guideLayout->addWidget(m_guideLineAngleSpinBox);
+    guideLayout->addWidget(guideAngle1Label);
+    guideLayout->addWidget(m_guideLineAngle1SpinBox);
+    guideLayout->addWidget(m_wheelAdjustGuide1Button);
+    guideLayout->addSpacing(8);
+    guideLayout->addWidget(guideAngle2Label);
+    guideLayout->addWidget(m_guideLineAngle2SpinBox);
+    guideLayout->addWidget(m_wheelAdjustGuide2Button);
     guideLayout->addWidget(m_pointsLockLabel);
     guideLayout->addStretch();
     mainLayout->addLayout(guideLayout);
+
+    QHBoxLayout *colorLayout = new QHBoxLayout();
+    colorLayout->addWidget(new QLabel(QStringLiteral("点1颜色:"), this));
+    m_point1ColorButton = createColorButton(Qt::red);
+    connect(m_point1ColorButton, &QPushButton::clicked, this, &MainWindow::onPoint1ColorClicked);
+    colorLayout->addWidget(m_point1ColorButton);
+
+    colorLayout->addWidget(new QLabel(QStringLiteral("点2颜色:"), this));
+    m_point2ColorButton = createColorButton(QColor(255, 80, 80));
+    connect(m_point2ColorButton, &QPushButton::clicked, this, &MainWindow::onPoint2ColorClicked);
+    colorLayout->addWidget(m_point2ColorButton);
+
+    colorLayout->addWidget(new QLabel(QStringLiteral("辅助线1:"), this));
+    m_guideLine1ColorButton = createColorButton(QColor(255, 180, 0));
+    connect(m_guideLine1ColorButton, &QPushButton::clicked, this, &MainWindow::onGuideLine1ColorClicked);
+    colorLayout->addWidget(m_guideLine1ColorButton);
+
+    colorLayout->addWidget(new QLabel(QStringLiteral("辅助线2:"), this));
+    m_guideLine2ColorButton = createColorButton(QColor(255, 220, 0));
+    connect(m_guideLine2ColorButton, &QPushButton::clicked, this, &MainWindow::onGuideLine2ColorClicked);
+    colorLayout->addWidget(m_guideLine2ColorButton);
+
+    colorLayout->addWidget(new QLabel(QStringLiteral("测距线:"), this));
+    m_measureLineColorButton = createColorButton(QColor(0, 200, 255));
+    connect(m_measureLineColorButton, &QPushButton::clicked, this, &MainWindow::onMeasureLineColorClicked);
+    colorLayout->addWidget(m_measureLineColorButton);
+    colorLayout->addStretch();
+    mainLayout->addLayout(colorLayout);
+
+    m_imageLabel->setPoint1Color(Qt::red);
+    m_imageLabel->setPoint2Color(QColor(255, 80, 80));
+    m_imageLabel->setGuideLine1Color(QColor(255, 180, 0));
+    m_imageLabel->setGuideLine2Color(QColor(255, 220, 0));
+    m_imageLabel->setMeasureLineColor(QColor(0, 200, 255));
 
     mainLayout->addLayout(infoLayout);
     mainLayout->addLayout(precisionLayout);
@@ -224,18 +288,149 @@ void MainWindow::onGuideLinesToggled(bool checked)
     updateGuideLineControls(m_imageLabel->imagePoints());
 }
 
-void MainWindow::onGuideLineAngleChanged(double value)
+void MainWindow::onGuideLineAngle1Changed(double value)
 {
-    m_imageLabel->setGuideLineAngle(value);
+    m_imageLabel->setGuideLineAngle1(value);
+}
+
+void MainWindow::onGuideLineAngle2Changed(double value)
+{
+    m_imageLabel->setGuideLineAngle2(value);
+}
+
+void MainWindow::onWheelAdjustGuide1Toggled(bool checked)
+{
+    if (checked) {
+        m_wheelAdjustGuide2Button->setChecked(false);
+        m_imageLabel->setWheelAdjustTarget(ImageLabel::WheelAdjustTarget::GuideLine1);
+    } else if (!m_wheelAdjustGuide2Button->isChecked()) {
+        m_imageLabel->setWheelAdjustTarget(ImageLabel::WheelAdjustTarget::None);
+    }
+}
+
+void MainWindow::onWheelAdjustGuide2Toggled(bool checked)
+{
+    if (checked) {
+        m_wheelAdjustGuide1Button->setChecked(false);
+        m_imageLabel->setWheelAdjustTarget(ImageLabel::WheelAdjustTarget::GuideLine2);
+    } else if (!m_wheelAdjustGuide1Button->isChecked()) {
+        m_imageLabel->setWheelAdjustTarget(ImageLabel::WheelAdjustTarget::None);
+    }
+}
+
+void MainWindow::onPoint1ColorClicked()
+{
+    const QColor currentColor(m_point1ColorButton->property("colorValue").toString());
+    const QColor color = QColorDialog::getColor(currentColor,
+                                                this,
+                                                QStringLiteral("选择点1颜色"));
+    if (!color.isValid()) {
+        return;
+    }
+
+    m_imageLabel->setPoint1Color(color);
+    updateColorButton(m_point1ColorButton, color);
+}
+
+void MainWindow::onPoint2ColorClicked()
+{
+    const QColor currentColor(m_point2ColorButton->property("colorValue").toString());
+    const QColor color = QColorDialog::getColor(currentColor,
+                                                this,
+                                                QStringLiteral("选择点2颜色"));
+    if (!color.isValid()) {
+        return;
+    }
+
+    m_imageLabel->setPoint2Color(color);
+    updateColorButton(m_point2ColorButton, color);
+}
+
+void MainWindow::onGuideLine1ColorClicked()
+{
+    const QColor currentColor(m_guideLine1ColorButton->property("colorValue").toString());
+    const QColor color = QColorDialog::getColor(currentColor,
+                                                this,
+                                                QStringLiteral("选择辅助线1颜色"));
+    if (!color.isValid()) {
+        return;
+    }
+
+    m_imageLabel->setGuideLine1Color(color);
+    updateColorButton(m_guideLine1ColorButton, color);
+}
+
+void MainWindow::onGuideLine2ColorClicked()
+{
+    const QColor currentColor(m_guideLine2ColorButton->property("colorValue").toString());
+    const QColor color = QColorDialog::getColor(currentColor,
+                                                this,
+                                                QStringLiteral("选择辅助线2颜色"));
+    if (!color.isValid()) {
+        return;
+    }
+
+    m_imageLabel->setGuideLine2Color(color);
+    updateColorButton(m_guideLine2ColorButton, color);
+}
+
+void MainWindow::onMeasureLineColorClicked()
+{
+    const QColor currentColor(m_measureLineColorButton->property("colorValue").toString());
+    const QColor color = QColorDialog::getColor(currentColor,
+                                                this,
+                                                QStringLiteral("选择测距线颜色"));
+    if (!color.isValid()) {
+        return;
+    }
+
+    m_imageLabel->setMeasureLineColor(color);
+    updateColorButton(m_measureLineColorButton, color);
+}
+
+void MainWindow::onGuideLineAngle1Updated(double value)
+{
+    const QSignalBlocker blocker(m_guideLineAngle1SpinBox);
+    m_guideLineAngle1SpinBox->setValue(value);
+}
+
+void MainWindow::onGuideLineAngle2Updated(double value)
+{
+    const QSignalBlocker blocker(m_guideLineAngle2SpinBox);
+    m_guideLineAngle2SpinBox->setValue(value);
 }
 
 void MainWindow::updateGuideLineControls(const QVector<QPoint> &imagePoints)
 {
     const bool hasTwoPoints = imagePoints.size() >= 2;
-    m_guideLineAngleSpinBox->setEnabled(m_guideLinesCheckBox->isChecked() && hasTwoPoints);
+    const bool guideEnabled = m_guideLinesCheckBox->isChecked() && hasTwoPoints;
+    m_guideLineAngle1SpinBox->setEnabled(guideEnabled);
+    m_guideLineAngle2SpinBox->setEnabled(guideEnabled);
+    m_wheelAdjustGuide1Button->setEnabled(guideEnabled);
+    m_wheelAdjustGuide2Button->setEnabled(guideEnabled);
+    if (!guideEnabled) {
+        m_wheelAdjustGuide1Button->setChecked(false);
+        m_wheelAdjustGuide2Button->setChecked(false);
+        m_imageLabel->setWheelAdjustTarget(ImageLabel::WheelAdjustTarget::None);
+    }
     m_pointsLockLabel->setText(hasTwoPoints
         ? QStringLiteral("选点已锁定，请点击「清除选点」后重新选择")
         : QString());
+}
+
+QPushButton *MainWindow::createColorButton(const QColor &initialColor)
+{
+    QPushButton *button = new QPushButton(this);
+    button->setFixedSize(28, 22);
+    updateColorButton(button, initialColor);
+    return button;
+}
+
+void MainWindow::updateColorButton(QPushButton *button, const QColor &color)
+{
+    button->setStyleSheet(QStringLiteral("background-color: %1; border: 1px solid #888;")
+                              .arg(color.name()));
+    button->setProperty("colorValue", color.name());
 }
 
 void MainWindow::updateHideButtonText(QPushButton *button, bool hidden, const QString &name)

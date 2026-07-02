@@ -16,7 +16,14 @@ ImageLabel::ImageLabel(QWidget *parent)
     , m_point2Visible(true)
     , m_lineVisible(true)
     , m_guideLinesEnabled(false)
-    , m_guideLineAngle(0.0)
+    , m_guideLineAngle1(0.0)
+    , m_guideLineAngle2(0.0)
+    , m_wheelAdjustTarget(WheelAdjustTarget::None)
+    , m_point1Color(Qt::red)
+    , m_point2Color(QColor(255, 80, 80))
+    , m_guideLine1Color(QColor(255, 180, 0))
+    , m_guideLine2Color(QColor(255, 220, 0))
+    , m_measureLineColor(QColor(0, 200, 255))
     , m_panning(false)
 {
     setAlignment(Qt::AlignCenter);
@@ -153,21 +160,128 @@ bool ImageLabel::guideLinesEnabled() const
     return m_guideLinesEnabled;
 }
 
-void ImageLabel::setGuideLineAngle(double degrees)
+void ImageLabel::setGuideLineAngle1(double degrees)
 {
-    const double normalized = std::fmod(degrees, 360.0);
-    const double angle = normalized < 0.0 ? normalized + 360.0 : normalized;
-    if (qFuzzyCompare(angle, m_guideLineAngle)) {
+    setGuideLineAngleInternal(1, degrees, false);
+}
+
+void ImageLabel::setGuideLineAngle2(double degrees)
+{
+    setGuideLineAngleInternal(2, degrees, false);
+}
+
+double ImageLabel::guideLineAngle1() const
+{
+    return m_guideLineAngle1;
+}
+
+double ImageLabel::guideLineAngle2() const
+{
+    return m_guideLineAngle2;
+}
+
+void ImageLabel::setWheelAdjustTarget(WheelAdjustTarget target)
+{
+    m_wheelAdjustTarget = target;
+}
+
+ImageLabel::WheelAdjustTarget ImageLabel::wheelAdjustTarget() const
+{
+    return m_wheelAdjustTarget;
+}
+
+void ImageLabel::setPoint1Color(const QColor &color)
+{
+    if (!color.isValid() || m_point1Color == color) {
         return;
     }
 
-    m_guideLineAngle = angle;
+    m_point1Color = color;
     update();
 }
 
-double ImageLabel::guideLineAngle() const
+void ImageLabel::setPoint2Color(const QColor &color)
 {
-    return m_guideLineAngle;
+    if (!color.isValid() || m_point2Color == color) {
+        return;
+    }
+
+    m_point2Color = color;
+    update();
+}
+
+void ImageLabel::setGuideLine1Color(const QColor &color)
+{
+    if (!color.isValid() || m_guideLine1Color == color) {
+        return;
+    }
+
+    m_guideLine1Color = color;
+    update();
+}
+
+void ImageLabel::setGuideLine2Color(const QColor &color)
+{
+    if (!color.isValid() || m_guideLine2Color == color) {
+        return;
+    }
+
+    m_guideLine2Color = color;
+    update();
+}
+
+void ImageLabel::setMeasureLineColor(const QColor &color)
+{
+    if (!color.isValid() || m_measureLineColor == color) {
+        return;
+    }
+
+    m_measureLineColor = color;
+    update();
+}
+
+double ImageLabel::normalizeAngle(double degrees)
+{
+    const double normalized = std::fmod(degrees, 360.0);
+    return normalized < 0.0 ? normalized + 360.0 : normalized;
+}
+
+void ImageLabel::setGuideLineAngleInternal(int index, double degrees, bool emitSignal)
+{
+    const double angle = normalizeAngle(degrees);
+    if (index == 1) {
+        if (qFuzzyCompare(angle, m_guideLineAngle1)) {
+            return;
+        }
+        m_guideLineAngle1 = angle;
+        if (emitSignal) {
+            emit guideLineAngle1Changed(m_guideLineAngle1);
+        }
+    } else {
+        if (qFuzzyCompare(angle, m_guideLineAngle2)) {
+            return;
+        }
+        m_guideLineAngle2 = angle;
+        if (emitSignal) {
+            emit guideLineAngle2Changed(m_guideLineAngle2);
+        }
+    }
+    update();
+}
+
+void ImageLabel::adjustGuideLineAngleByWheel(int index, int wheelDelta)
+{
+    if (wheelDelta == 0) {
+        return;
+    }
+
+    const double step = (wheelDelta > 0 ? kAngleWheelStep : -kAngleWheelStep)
+        * static_cast<double>(qAbs(wheelDelta)) / 120.0;
+    if (index == 1) {
+        setGuideLineAngleInternal(1, m_guideLineAngle1 + step, true);
+    } else {
+        setGuideLineAngleInternal(2, m_guideLineAngle2 + step, true);
+    }
 }
 
 bool ImageLabel::pointsLocked() const
@@ -251,6 +365,19 @@ void ImageLabel::wheelEvent(QWheelEvent *event)
         return;
     }
 
+    if (m_guideLinesEnabled && pointsLocked()) {
+        if (m_wheelAdjustTarget == WheelAdjustTarget::GuideLine1) {
+            adjustGuideLineAngleByWheel(1, delta);
+            event->accept();
+            return;
+        }
+        if (m_wheelAdjustTarget == WheelAdjustTarget::GuideLine2) {
+            adjustGuideLineAngleByWheel(2, delta);
+            event->accept();
+            return;
+        }
+    }
+
     const double factor = delta > 0 ? kZoomStep : (1.0 / kZoomStep);
     setZoomFactorAt(m_zoomFactor * factor, event->pos());
     event->accept();
@@ -284,7 +411,7 @@ void ImageLabel::paintEvent(QPaintEvent *event)
     }
 
     if (widgetPoints.size() >= 2 && m_lineVisible) {
-        QPen linePen(QColor(0, 200, 255));
+        QPen linePen(m_measureLineColor);
         linePen.setWidth(2);
         linePen.setStyle(Qt::DashLine);
         painter.setPen(linePen);
@@ -292,18 +419,9 @@ void ImageLabel::paintEvent(QPaintEvent *event)
     }
 
     if (widgetPoints.size() >= 2 && m_guideLinesEnabled) {
-        QPen guidePen(QColor(255, 180, 0));
-        guidePen.setWidth(1);
-        guidePen.setStyle(Qt::DashDotLine);
-        painter.setPen(guidePen);
-        drawGuideLine(painter, m_imagePoints.at(0));
-        drawGuideLine(painter, m_imagePoints.at(1));
+        drawGuideLine(painter, m_imagePoints.at(0), m_guideLineAngle1, m_guideLine1Color);
+        drawGuideLine(painter, m_imagePoints.at(1), m_guideLineAngle2, m_guideLine2Color);
     }
-
-    QPen pointPen(Qt::red);
-    pointPen.setWidth(2);
-    painter.setPen(pointPen);
-    painter.setBrush(Qt::red);
 
     auto drawPointCoord = [&painter](const QPoint &widgetPoint, const QPoint &imagePoint) {
         const QString coordText = QStringLiteral("(%1, %2) pixel").arg(imagePoint.x()).arg(imagePoint.y());
@@ -318,11 +436,19 @@ void ImageLabel::paintEvent(QPaintEvent *event)
     };
 
     if (widgetPoints.size() >= 1 && m_point1Visible) {
+        QPen pointPen(m_point1Color);
+        pointPen.setWidth(2);
+        painter.setPen(pointPen);
+        painter.setBrush(m_point1Color);
         painter.drawEllipse(widgetPoints.at(0), 5, 5);
         drawPointCoord(widgetPoints.at(0), m_imagePoints.at(0));
     }
 
     if (widgetPoints.size() >= 2 && m_point2Visible) {
+        QPen pointPen(m_point2Color);
+        pointPen.setWidth(2);
+        painter.setPen(pointPen);
+        painter.setBrush(m_point2Color);
         painter.drawEllipse(widgetPoints.at(1), 5, 5);
         drawPointCoord(widgetPoints.at(1), m_imagePoints.at(1));
     }
@@ -376,9 +502,15 @@ QPoint ImageLabel::imageToWidget(const QPoint &imagePoint) const
     return QPoint(widgetX, widgetY);
 }
 
-void ImageLabel::drawGuideLine(QPainter &painter, const QPoint &imagePoint) const
+void ImageLabel::drawGuideLine(QPainter &painter, const QPoint &imagePoint, double angleDegrees,
+                               const QColor &color) const
 {
-    const double radians = qDegreesToRadians(m_guideLineAngle);
+    QPen guidePen(color);
+    guidePen.setWidth(1);
+    guidePen.setStyle(Qt::DashDotLine);
+    painter.setPen(guidePen);
+
+    const double radians = qDegreesToRadians(angleDegrees);
     const double dirX = qSin(radians);
     const double dirY = qCos(radians);
     const double maxLength = qSqrt(

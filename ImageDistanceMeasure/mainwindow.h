@@ -25,8 +25,7 @@ private slots:
     void onZoomOutClicked();
     void onZoomResetClicked();
     void onPanModeToggled(bool checked);
-    void onHidePoint1Toggled(bool checked);
-    void onHidePoint2Toggled(bool checked);
+    void onHidePointsToggled(bool checked);
     void onHideLineToggled(bool checked);
     void onGuideLinesToggled(bool checked);
     void onGuideLineAngle1Changed(double value);
@@ -61,8 +60,7 @@ private:
     QPushButton *m_zoomOutButton;
     QPushButton *m_zoomResetButton;
     QPushButton *m_panModeButton;
-    QPushButton *m_hidePoint1Button;
-    QPushButton *m_hidePoint2Button;
+    QPushButton *m_hidePointsButton;
     QPushButton *m_hideLineButton;
     QCheckBox *m_guideLinesCheckBox;
     QDoubleSpinBox *m_guideLineAngle1SpinBox;

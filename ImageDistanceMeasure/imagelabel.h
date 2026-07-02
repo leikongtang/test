@@ -31,6 +31,7 @@ public:
     bool panMode() const;
     void setPoint1Visible(bool visible);
     void setPoint2Visible(bool visible);
+    void setPointsVisible(bool visible);
     void setLineVisible(bool visible);
     bool point1Visible() const;
     bool point2Visible() const;

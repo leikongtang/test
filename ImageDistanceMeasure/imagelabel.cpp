@@ -120,6 +120,17 @@ void ImageLabel::setPoint2Visible(bool visible)
     update();
 }
 
+void ImageLabel::setPointsVisible(bool visible)
+{
+    if (m_point1Visible == visible && m_point2Visible == visible) {
+        return;
+    }
+
+    m_point1Visible = visible;
+    m_point2Visible = visible;
+    update();
+}
+
 void ImageLabel::setLineVisible(bool visible)
 {
     if (m_lineVisible == visible) {

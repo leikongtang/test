@@ -6,6 +6,8 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 
+#include <string>
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <shellapi.h>
@@ -207,8 +209,9 @@ void CleanupScanner::getDiskSpaceInfo(const QString &drive, qint64 *totalBytes, 
     const QString root = drive.endsWith(QStringLiteral(":"))
                              ? drive + QStringLiteral("\\")
                              : drive;
+    const std::wstring rootPath = root.toStdWString();
 
-    if (GetDiskFreeSpaceExW(reinterpret_cast<LPCWSTR>(root.utf16()),
+    if (GetDiskFreeSpaceExW(rootPath.c_str(),
                             &freeBytesAvailable,
                             &totalNumberOfBytes,
                             &totalNumberOfFreeBytes)) {

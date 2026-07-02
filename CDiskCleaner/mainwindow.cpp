@@ -18,6 +18,8 @@
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
+    , m_workerThread(nullptr)
+    , m_worker(nullptr)
     , m_isBusy(false)
     , m_totalScannedBytes(0)
 {
@@ -30,8 +32,10 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    if (m_workerThread->isRunning()) {
-        m_worker->requestCancel();
+    if (m_workerThread && m_workerThread->isRunning()) {
+        if (m_worker) {
+            m_worker->requestCancel();
+        }
         m_workerThread->quit();
         m_workerThread->wait(3000);
     }

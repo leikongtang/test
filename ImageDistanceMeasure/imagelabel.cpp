@@ -3,6 +3,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QWheelEvent>
+#include <QFontMetrics>
 #include <QtMath>
 
 ImageLabel::ImageLabel(QWidget *parent)
@@ -255,12 +256,26 @@ void ImageLabel::paintEvent(QPaintEvent *event)
     painter.setPen(pointPen);
     painter.setBrush(Qt::red);
 
+    auto drawPointCoord = [&painter](const QPoint &widgetPoint, const QPoint &imagePoint) {
+        const QString coordText = QStringLiteral("(%1, %2) pixel").arg(imagePoint.x()).arg(imagePoint.y());
+        const QPoint textTopLeft = widgetPoint + QPoint(8, -20);
+        const QFontMetrics fm(painter.font());
+        QRect textBg = fm.boundingRect(QRect(0, 0, 200, 30), Qt::AlignLeft | Qt::AlignVCenter, coordText);
+        textBg.moveTopLeft(textTopLeft);
+        textBg.adjust(-4, -2, 4, 2);
+        painter.fillRect(textBg, QColor(0, 0, 0, 160));
+        painter.setPen(Qt::white);
+        painter.drawText(textTopLeft.x(), textTopLeft.y() + fm.ascent(), coordText);
+    };
+
     if (widgetPoints.size() >= 1 && m_point1Visible) {
         painter.drawEllipse(widgetPoints.at(0), 5, 5);
+        drawPointCoord(widgetPoints.at(0), m_imagePoints.at(0));
     }
 
     if (widgetPoints.size() >= 2 && m_point2Visible) {
         painter.drawEllipse(widgetPoints.at(1), 5, 5);
+        drawPointCoord(widgetPoints.at(1), m_imagePoints.at(1));
     }
 
     QLabel::paintEvent(event);

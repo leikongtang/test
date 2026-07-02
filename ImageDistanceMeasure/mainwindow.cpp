@@ -69,8 +69,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_imageLabel, &ImageLabel::zoomFactorChanged, this, &MainWindow::onZoomFactorChanged);
 
     QHBoxLayout *infoLayout = new QHBoxLayout();
-    m_point1Label = new QLabel(QStringLiteral("点1: 未选择"), this);
-    m_point2Label = new QLabel(QStringLiteral("点2: 未选择"), this);
+    m_point1Label = new QLabel(QStringLiteral("点1像素: 未选择"), this);
+    m_point2Label = new QLabel(QStringLiteral("点2像素: 未选择"), this);
     m_pixelDistanceLabel = new QLabel(QStringLiteral("像素距离: --"), this);
     infoLayout->addWidget(m_point1Label);
     infoLayout->addWidget(m_point2Label);
@@ -206,16 +206,18 @@ void MainWindow::onPointsChanged(const QVector<QPoint> &imagePoints, double pixe
 
     if (imagePoints.size() >= 1) {
         const QPoint p1 = imagePoints.at(0);
-        m_point1Label->setText(QStringLiteral("点1: (%1, %2)").arg(p1.x()).arg(p1.y()));
+        m_point1Label->setText(
+            QStringLiteral("点1像素: (%1, %2) pixel").arg(p1.x()).arg(p1.y()));
     } else {
-        m_point1Label->setText(QStringLiteral("点1: 未选择"));
+        m_point1Label->setText(QStringLiteral("点1像素: 未选择"));
     }
 
     if (imagePoints.size() >= 2) {
         const QPoint p2 = imagePoints.at(1);
-        m_point2Label->setText(QStringLiteral("点2: (%1, %2)").arg(p2.x()).arg(p2.y()));
+        m_point2Label->setText(
+            QStringLiteral("点2像素: (%1, %2) pixel").arg(p2.x()).arg(p2.y()));
     } else {
-        m_point2Label->setText(QStringLiteral("点2: 未选择"));
+        m_point2Label->setText(QStringLiteral("点2像素: 未选择"));
     }
 
     updateDistanceDisplay();

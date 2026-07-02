@@ -24,17 +24,29 @@ MainWindow::MainWindow(QWidget *parent)
     QHBoxLayout *toolLayout = new QHBoxLayout();
     m_selectImageButton = new QPushButton(QStringLiteral("选择图片"), this);
     m_clearPointsButton = new QPushButton(QStringLiteral("清除选点"), this);
+    m_zoomInButton = new QPushButton(QStringLiteral("放大"), this);
+    m_zoomOutButton = new QPushButton(QStringLiteral("缩小"), this);
+    m_zoomResetButton = new QPushButton(QStringLiteral("适应窗口"), this);
     m_fileNameLabel = new QLabel(QStringLiteral("未选择文件"), this);
+    m_zoomLabel = new QLabel(QStringLiteral("缩放: 100%"), this);
 
     connect(m_selectImageButton, &QPushButton::clicked, this, &MainWindow::onSelectImageClicked);
     connect(m_clearPointsButton, &QPushButton::clicked, this, &MainWindow::onClearPointsClicked);
+    connect(m_zoomInButton, &QPushButton::clicked, this, &MainWindow::onZoomInClicked);
+    connect(m_zoomOutButton, &QPushButton::clicked, this, &MainWindow::onZoomOutClicked);
+    connect(m_zoomResetButton, &QPushButton::clicked, this, &MainWindow::onZoomResetClicked);
 
     toolLayout->addWidget(m_selectImageButton);
     toolLayout->addWidget(m_clearPointsButton);
+    toolLayout->addWidget(m_zoomInButton);
+    toolLayout->addWidget(m_zoomOutButton);
+    toolLayout->addWidget(m_zoomResetButton);
+    toolLayout->addWidget(m_zoomLabel);
     toolLayout->addWidget(m_fileNameLabel, 1);
 
     m_imageLabel = new ImageLabel(this);
     connect(m_imageLabel, &ImageLabel::pointsChanged, this, &MainWindow::onPointsChanged);
+    connect(m_imageLabel, &ImageLabel::zoomFactorChanged, this, &MainWindow::onZoomFactorChanged);
 
     QHBoxLayout *infoLayout = new QHBoxLayout();
     m_point1Label = new QLabel(QStringLiteral("点1: 未选择"), this);
@@ -118,6 +130,26 @@ void MainWindow::onSelectImageClicked()
 void MainWindow::onClearPointsClicked()
 {
     m_imageLabel->clearPoints();
+}
+
+void MainWindow::onZoomInClicked()
+{
+    m_imageLabel->zoomIn();
+}
+
+void MainWindow::onZoomOutClicked()
+{
+    m_imageLabel->zoomOut();
+}
+
+void MainWindow::onZoomResetClicked()
+{
+    m_imageLabel->zoomReset();
+}
+
+void MainWindow::onZoomFactorChanged(double factor)
+{
+    m_zoomLabel->setText(QStringLiteral("缩放: %1%").arg(qRound(factor * 100.0)));
 }
 
 void MainWindow::onPointsChanged(const QVector<QPoint> &imagePoints, double pixelDistance)

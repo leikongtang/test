@@ -18,6 +18,10 @@ public:
 private slots:
     void onSelectImageClicked();
     void onClearPointsClicked();
+    void onZoomInClicked();
+    void onZoomOutClicked();
+    void onZoomResetClicked();
+    void onZoomFactorChanged(double factor);
     void onPointsChanged(const QVector<QPoint> &imagePoints, double pixelDistance);
     void onCalibrationChanged(double value);
 
@@ -29,7 +33,11 @@ private:
     ImageLabel *m_imageLabel;
     QPushButton *m_selectImageButton;
     QPushButton *m_clearPointsButton;
+    QPushButton *m_zoomInButton;
+    QPushButton *m_zoomOutButton;
+    QPushButton *m_zoomResetButton;
     QLabel *m_fileNameLabel;
+    QLabel *m_zoomLabel;
     QLabel *m_point1Label;
     QLabel *m_point2Label;
     QLabel *m_pixelDistanceLabel;

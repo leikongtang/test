@@ -27,6 +27,9 @@ MainWindow::MainWindow(QWidget *parent)
     QHBoxLayout *toolLayout = new QHBoxLayout();
     m_selectImageButton = new QPushButton(QStringLiteral("选择图片"), this);
     m_clearPointsButton = new QPushButton(QStringLiteral("清除选点"), this);
+    m_exportResultButton = new QPushButton(QStringLiteral("导出结果图"), this);
+    m_exportResultButton->setToolTip(QStringLiteral("导出含两点、测距线及距离信息的结果图片"));
+    m_exportResultButton->setEnabled(false);
     m_zoomInButton = new QPushButton(QStringLiteral("放大"), this);
     m_zoomOutButton = new QPushButton(QStringLiteral("缩小"), this);
     m_zoomResetButton = new QPushButton(QStringLiteral("适应窗口"), this);
@@ -47,6 +50,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(m_selectImageButton, &QPushButton::clicked, this, &MainWindow::onSelectImageClicked);
     connect(m_clearPointsButton, &QPushButton::clicked, this, &MainWindow::onClearPointsClicked);
+    connect(m_exportResultButton, &QPushButton::clicked, this, &MainWindow::onExportResultClicked);
     connect(m_zoomInButton, &QPushButton::clicked, this, &MainWindow::onZoomInClicked);
     connect(m_zoomOutButton, &QPushButton::clicked, this, &MainWindow::onZoomOutClicked);
     connect(m_zoomResetButton, &QPushButton::clicked, this, &MainWindow::onZoomResetClicked);
@@ -57,6 +61,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     toolLayout->addWidget(m_selectImageButton);
     toolLayout->addWidget(m_clearPointsButton);
+    toolLayout->addWidget(m_exportResultButton);
     toolLayout->addWidget(m_zoomInButton);
     toolLayout->addWidget(m_zoomOutButton);
     toolLayout->addWidget(m_zoomResetButton);
@@ -242,6 +247,44 @@ void MainWindow::onSelectImageClicked()
 void MainWindow::onClearPointsClicked()
 {
     m_imageLabel->clearPoints();
+}
+
+void MainWindow::onExportResultClicked()
+{
+    if (!m_imageLabel->pointsLocked()) {
+        return;
+    }
+
+    const QString filePath = QFileDialog::getSaveFileName(
+        this,
+        QStringLiteral("导出结果图"),
+        QStringLiteral("measure_result.png"),
+        QStringLiteral("PNG 图片 (*.png);;JPEG 图片 (*.jpg *.jpeg);;BMP 图片 (*.bmp)"));
+
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    QString pixelText = QStringLiteral("像素距离: %1 px")
+                            .arg(m_imageLabel->pixelDistance(), 0, 'f', 2);
+    QString realText;
+    const double precision = pixelPrecision();
+    if (precision > 0.0) {
+        const double realDistance = m_imageLabel->pixelDistance() * precision;
+        realText = QStringLiteral("实际距离: %1 mm").arg(realDistance, 0, 'f', 4);
+    }
+
+    const QPixmap resultImage = m_imageLabel->renderResultImage(pixelText, realText);
+    if (resultImage.isNull()) {
+        return;
+    }
+
+    if (!resultImage.save(filePath)) {
+        m_fileNameLabel->setText(QStringLiteral("结果图导出失败"));
+        return;
+    }
+
+    m_fileNameLabel->setText(QStringLiteral("已导出: %1").arg(QFileInfo(filePath).fileName()));
 }
 
 void MainWindow::onZoomInClicked()
@@ -464,6 +507,7 @@ void MainWindow::onPointsChanged(const QVector<QPoint> &imagePoints, double pixe
     }
 
     updateGuideLineControls(imagePoints);
+    m_exportResultButton->setEnabled(imagePoints.size() >= 2);
     updateDistanceDisplay();
 }
 

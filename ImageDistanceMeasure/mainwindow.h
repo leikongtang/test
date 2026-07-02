@@ -20,6 +20,7 @@ public:
 private slots:
     void onSelectImageClicked();
     void onClearPointsClicked();
+    void onExportResultClicked();
     void onZoomInClicked();
     void onZoomOutClicked();
     void onZoomResetClicked();
@@ -55,6 +56,7 @@ private:
     ImageLabel *m_imageLabel;
     QPushButton *m_selectImageButton;
     QPushButton *m_clearPointsButton;
+    QPushButton *m_exportResultButton;
     QPushButton *m_zoomInButton;
     QPushButton *m_zoomOutButton;
     QPushButton *m_zoomResetButton;

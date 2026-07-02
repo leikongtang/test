@@ -289,6 +289,111 @@ bool ImageLabel::pointsLocked() const
     return m_imagePoints.size() >= 2;
 }
 
+double ImageLabel::pixelDistance() const
+{
+    return m_pixelDistance;
+}
+
+int ImageLabel::imageDrawScale(const QPixmap &pixmap) const
+{
+    return qMax(1, qMin(pixmap.width(), pixmap.height()) / 800);
+}
+
+void ImageLabel::drawPointCoordOnImage(QPainter &painter, const QPoint &imagePoint,
+                                       int fontPixelSize) const
+{
+    QFont font = painter.font();
+    font.setPixelSize(fontPixelSize);
+    painter.setFont(font);
+
+    const QString coordText = QStringLiteral("(%1, %2) pixel").arg(imagePoint.x()).arg(imagePoint.y());
+    const QPoint textTopLeft = imagePoint + QPoint(fontPixelSize, -fontPixelSize);
+    const QFontMetrics fm(font);
+    QRect textBg = fm.boundingRect(QRect(0, 0, 400, fontPixelSize * 2),
+                                   Qt::AlignLeft | Qt::AlignVCenter, coordText);
+    textBg.moveTopLeft(textTopLeft);
+    textBg.adjust(-4, -2, 4, 2);
+    painter.fillRect(textBg, QColor(0, 0, 0, 180));
+    painter.setPen(Qt::white);
+    painter.drawText(textTopLeft.x(), textTopLeft.y() + fm.ascent(), coordText);
+}
+
+QPixmap ImageLabel::renderResultImage(const QString &pixelDistanceText,
+                                      const QString &realDistanceText) const
+{
+    if (m_originalPixmap.isNull() || m_imagePoints.size() < 2) {
+        return QPixmap();
+    }
+
+    QPixmap result = m_originalPixmap.copy();
+    QPainter painter(&result);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    const int scale = imageDrawScale(result);
+    const int pointRadius = 5 * scale;
+    const int lineWidth = qMax(2, 2 * scale);
+    const int fontSize = qMax(12, 14 * scale);
+
+    QPen linePen(m_measureLineColor);
+    linePen.setWidth(lineWidth);
+    linePen.setStyle(Qt::DashLine);
+    painter.setPen(linePen);
+    painter.drawLine(m_imagePoints.at(0), m_imagePoints.at(1));
+
+    QPen point1Pen(m_point1Color);
+    point1Pen.setWidth(lineWidth);
+    painter.setPen(point1Pen);
+    painter.setBrush(m_point1Color);
+    painter.drawEllipse(m_imagePoints.at(0), pointRadius, pointRadius);
+    drawPointCoordOnImage(painter, m_imagePoints.at(0), fontSize);
+
+    QPen point2Pen(m_point2Color);
+    point2Pen.setWidth(lineWidth);
+    painter.setPen(point2Pen);
+    painter.setBrush(m_point2Color);
+    painter.drawEllipse(m_imagePoints.at(1), pointRadius, pointRadius);
+    drawPointCoordOnImage(painter, m_imagePoints.at(1), fontSize);
+
+    QStringList infoLines;
+    if (!pixelDistanceText.isEmpty()) {
+        infoLines.append(pixelDistanceText);
+    }
+    if (!realDistanceText.isEmpty()) {
+        infoLines.append(realDistanceText);
+    }
+
+    if (!infoLines.isEmpty()) {
+        QFont infoFont = painter.font();
+        infoFont.setPixelSize(fontSize + 2);
+        infoFont.setBold(true);
+        painter.setFont(infoFont);
+
+        const QFontMetrics fm(infoFont);
+        const int padding = 8 * scale;
+        const int lineHeight = fm.height();
+        const int boxWidth = fm.horizontalAdvance(infoLines.at(0));
+        int maxWidth = boxWidth;
+        for (int i = 1; i < infoLines.size(); ++i) {
+            maxWidth = qMax(maxWidth, fm.horizontalAdvance(infoLines.at(i)));
+        }
+
+        const QRect infoRect(padding, padding,
+                             maxWidth + padding * 2,
+                             lineHeight * infoLines.size() + padding * 2);
+        painter.fillRect(infoRect, QColor(0, 0, 0, 190));
+        painter.setPen(QColor(0, 200, 255));
+
+        int textY = infoRect.top() + padding + fm.ascent();
+        for (const QString &line : infoLines) {
+            painter.drawText(infoRect.left() + padding, textY, line);
+            textY += lineHeight;
+        }
+    }
+
+    painter.end();
+    return result;
+}
+
 void ImageLabel::mousePressEvent(QMouseEvent *event)
 {
     if (m_originalPixmap.isNull()) {

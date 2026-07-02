@@ -49,6 +49,9 @@ public:
     void setGuideLine2Color(const QColor &color);
     void setMeasureLineColor(const QColor &color);
     bool pointsLocked() const;
+    double pixelDistance() const;
+    QPixmap renderResultImage(const QString &pixelDistanceText,
+                              const QString &realDistanceText) const;
 
 signals:
     void pointsChanged(const QVector<QPoint> &imagePoints, double pixelDistance);
@@ -73,6 +76,8 @@ private:
     QPoint imageToWidget(const QPoint &imagePoint) const;
     void drawGuideLine(QPainter &painter, const QPoint &imagePoint, double angleDegrees,
                        const QColor &color) const;
+    void drawPointCoordOnImage(QPainter &painter, const QPoint &imagePoint, int fontPixelSize) const;
+    int imageDrawScale(const QPixmap &pixmap) const;
     void updateDistance();
     void setZoomFactorAt(double factor, const QPoint &anchor);
     void emitZoomFactorChanged();

@@ -46,21 +46,39 @@ MainWindow::MainWindow(QWidget *parent)
     infoLayout->addStretch();
 
     QHBoxLayout *precisionLayout = new QHBoxLayout();
-    QLabel *precisionLabel = new QLabel(QStringLiteral("像素精度 (每像素实际长度):"), this);
-    m_precisionSpinBox = new QDoubleSpinBox(this);
-    m_precisionSpinBox->setDecimals(6);
-    m_precisionSpinBox->setRange(0.000001, 1000000.0);
-    m_precisionSpinBox->setValue(1.0);
-    m_precisionSpinBox->setSuffix(QStringLiteral(" mm/px"));
-    m_precisionSpinBox->setToolTip(QStringLiteral("输入每个像素对应的实际长度，用于计算两点之间的实际距离"));
-    connect(m_precisionSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &MainWindow::onPrecisionChanged);
+    QLabel *referenceLengthLabel = new QLabel(QStringLiteral("标定长度:"), this);
+    m_referenceLengthSpinBox = new QDoubleSpinBox(this);
+    m_referenceLengthSpinBox->setDecimals(4);
+    m_referenceLengthSpinBox->setRange(0.0, 1000000.0);
+    m_referenceLengthSpinBox->setValue(1.0);
+    m_referenceLengthSpinBox->setSuffix(QStringLiteral(" mm"));
+    m_referenceLengthSpinBox->setToolTip(QStringLiteral("输入已知物体的实际长度"));
+    connect(m_referenceLengthSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onCalibrationChanged);
+
+    QLabel *referencePixelLabel = new QLabel(QStringLiteral("标定像素:"), this);
+    m_referencePixelSpinBox = new QDoubleSpinBox(this);
+    m_referencePixelSpinBox->setDecimals(2);
+    m_referencePixelSpinBox->setRange(0.01, 1000000.0);
+    m_referencePixelSpinBox->setValue(1.0);
+    m_referencePixelSpinBox->setSuffix(QStringLiteral(" pixel"));
+    m_referencePixelSpinBox->setToolTip(QStringLiteral("输入该物体在图片上对应的像素长度"));
+    connect(m_referencePixelSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onCalibrationChanged);
+
+    m_precisionLabel = new QLabel(QStringLiteral("像素精度: 1.000000 mm/pixel"), this);
+    m_precisionLabel->setToolTip(QStringLiteral("像素精度 = 标定长度 ÷ 标定像素"));
 
     m_realDistanceLabel = new QLabel(QStringLiteral("实际距离: --"), this);
     m_realDistanceLabel->setStyleSheet(QStringLiteral("font-weight: bold; color: #0078d4;"));
 
-    precisionLayout->addWidget(precisionLabel);
-    precisionLayout->addWidget(m_precisionSpinBox);
+    precisionLayout->addWidget(referenceLengthLabel);
+    precisionLayout->addWidget(m_referenceLengthSpinBox);
+    precisionLayout->addSpacing(12);
+    precisionLayout->addWidget(referencePixelLabel);
+    precisionLayout->addWidget(m_referencePixelSpinBox);
+    precisionLayout->addSpacing(12);
+    precisionLayout->addWidget(m_precisionLabel);
     precisionLayout->addSpacing(20);
     precisionLayout->addWidget(m_realDistanceLabel);
     precisionLayout->addStretch();
@@ -123,9 +141,32 @@ void MainWindow::onPointsChanged(const QVector<QPoint> &imagePoints, double pixe
     updateDistanceDisplay();
 }
 
-void MainWindow::onPrecisionChanged(double /*value*/)
+void MainWindow::onCalibrationChanged(double /*value*/)
 {
+    updatePrecisionDisplay();
     updateDistanceDisplay();
+}
+
+double MainWindow::pixelPrecision() const
+{
+    const double referencePixels = m_referencePixelSpinBox->value();
+    if (referencePixels <= 0.0) {
+        return 0.0;
+    }
+
+    return m_referenceLengthSpinBox->value() / referencePixels;
+}
+
+void MainWindow::updatePrecisionDisplay()
+{
+    const double precision = pixelPrecision();
+    if (precision <= 0.0) {
+        m_precisionLabel->setText(QStringLiteral("像素精度: --"));
+        return;
+    }
+
+    m_precisionLabel->setText(
+        QStringLiteral("像素精度: %1 mm/pixel").arg(precision, 0, 'f', 6));
 }
 
 void MainWindow::updateDistanceDisplay()
@@ -139,7 +180,13 @@ void MainWindow::updateDistanceDisplay()
     m_pixelDistanceLabel->setText(
         QStringLiteral("像素距离: %1 px").arg(m_pixelDistance, 0, 'f', 2));
 
-    const double realDistance = m_pixelDistance * m_precisionSpinBox->value();
+    const double precision = pixelPrecision();
+    if (precision <= 0.0) {
+        m_realDistanceLabel->setText(QStringLiteral("实际距离: --"));
+        return;
+    }
+
+    const double realDistance = m_pixelDistance * precision;
     m_realDistanceLabel->setText(
         QStringLiteral("实际距离: %1 mm").arg(realDistance, 0, 'f', 4));
 }

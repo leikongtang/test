@@ -19,10 +19,12 @@ private slots:
     void onSelectImageClicked();
     void onClearPointsClicked();
     void onPointsChanged(const QVector<QPoint> &imagePoints, double pixelDistance);
-    void onPrecisionChanged(double value);
+    void onCalibrationChanged(double value);
 
 private:
+    double pixelPrecision() const;
     void updateDistanceDisplay();
+    void updatePrecisionDisplay();
 
     ImageLabel *m_imageLabel;
     QPushButton *m_selectImageButton;
@@ -32,7 +34,9 @@ private:
     QLabel *m_point2Label;
     QLabel *m_pixelDistanceLabel;
     QLabel *m_realDistanceLabel;
-    QDoubleSpinBox *m_precisionSpinBox;
+    QLabel *m_precisionLabel;
+    QDoubleSpinBox *m_referenceLengthSpinBox;
+    QDoubleSpinBox *m_referencePixelSpinBox;
 
     double m_pixelDistance;
 };

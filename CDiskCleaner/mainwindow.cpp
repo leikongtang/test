@@ -43,8 +43,8 @@ MainWindow::~MainWindow()
 
 void MainWindow::setupUi()
 {
-    setWindowTitle(QStringLiteral("C盘清理工具 v1.0.0"));
-    resize(860, 620);
+    setWindowTitle(QStringLiteral("C盘清理工具 v1.1.0"));
+    resize(980, 680);
 
     QWidget *centralWidget = new QWidget(this);
     QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
@@ -68,9 +68,10 @@ void MainWindow::setupUi()
     diskLayout->addStretch();
     diskLayout->addWidget(m_refreshDiskButton);
 
-    m_categoryTable = new QTableWidget(m_categories.size(), 5, this);
+    m_categoryTable = new QTableWidget(m_categories.size(), 6, this);
     m_categoryTable->setHorizontalHeaderLabels({
         QStringLiteral("选择"),
+        QStringLiteral("分组"),
         QStringLiteral("清理项目"),
         QStringLiteral("说明"),
         QStringLiteral("路径"),
@@ -78,9 +79,10 @@ void MainWindow::setupUi()
     });
     m_categoryTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_categoryTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_categoryTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    m_categoryTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_categoryTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
-    m_categoryTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    m_categoryTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    m_categoryTable->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
     m_categoryTable->verticalHeader()->setVisible(false);
     m_categoryTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_categoryTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -116,7 +118,7 @@ void MainWindow::setupUi()
     m_statusLabel = new QLabel(QStringLiteral("就绪。建议先扫描，确认后再清理。"), this);
 
     QLabel *tipLabel = new QLabel(
-        QStringLiteral("提示：带「需管理员」标记的项目请以管理员身份运行本程序后再清理。"), this);
+        QStringLiteral("提示：软件缓存清理前请关闭对应程序；带「需管理员」标记的项目请以管理员身份运行。"), this);
     tipLabel->setStyleSheet(QStringLiteral("color: #666;"));
 
     mainLayout->addLayout(diskLayout);
@@ -165,21 +167,35 @@ void MainWindow::updateCategoryRow(int row, const CleanupCategory &category)
         checkBox->setChecked(category.selected);
     }
 
+    m_categoryTable->setItem(row, 1, new QTableWidgetItem(category.group));
+
     QString nameText = category.name;
     if (category.requiresAdmin) {
         nameText += QStringLiteral(" (需管理员)");
     }
 
-    m_categoryTable->setItem(row, 1, new QTableWidgetItem(nameText));
-    m_categoryTable->setItem(row, 2, new QTableWidgetItem(category.description));
-    m_categoryTable->setItem(row, 3, new QTableWidgetItem(category.path.isEmpty()
-                                                               ? QStringLiteral("系统回收站")
-                                                               : category.path));
+    m_categoryTable->setItem(row, 2, new QTableWidgetItem(nameText));
+    m_categoryTable->setItem(row, 3, new QTableWidgetItem(category.description));
+
+    QString pathText;
+    if (category.id == CleanupCategory::Id::RecycleBin) {
+        pathText = QStringLiteral("系统回收站");
+    } else {
+        const QStringList pathList = category.effectivePaths();
+        if (pathList.isEmpty()) {
+            pathText = QStringLiteral("未检测到安装路径");
+        } else if (pathList.size() == 1) {
+            pathText = pathList.first();
+        } else {
+            pathText = QStringLiteral("%1 等 %2 个目录").arg(pathList.first()).arg(pathList.size());
+        }
+    }
+    m_categoryTable->setItem(row, 4, new QTableWidgetItem(pathText));
 
     const QString sizeText = category.scanned
                                  ? CleanupScanner::formatSize(category.sizeBytes)
                                  : QStringLiteral("--");
-    m_categoryTable->setItem(row, 4, new QTableWidgetItem(sizeText));
+    m_categoryTable->setItem(row, 5, new QTableWidgetItem(sizeText));
 }
 
 void MainWindow::updateSummary()

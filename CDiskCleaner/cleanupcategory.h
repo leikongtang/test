@@ -2,6 +2,7 @@
 #define CLEANUPCATEGORY_H
 
 #include <QString>
+#include <QStringList>
 
 struct CleanupCategory
 {
@@ -12,13 +13,22 @@ struct CleanupCategory
         Prefetch,
         ThumbnailCache,
         WindowsUpdateCache,
-        DeliveryOptimization
+        DeliveryOptimization,
+        ChromeCache,
+        EdgeCache,
+        FirefoxCache,
+        WeChatCache,
+        QQCache,
+        DingTalkCache,
+        WpsCache
     };
 
     Id id;
+    QString group;
     QString name;
     QString description;
     QString path;
+    QStringList paths;
     bool requiresAdmin;
     bool selected;
     qint64 sizeBytes;
@@ -31,6 +41,17 @@ struct CleanupCategory
         , sizeBytes(0)
         , scanned(false)
     {
+    }
+
+    QStringList effectivePaths() const
+    {
+        if (!paths.isEmpty()) {
+            return paths;
+        }
+        if (!path.isEmpty()) {
+            return QStringList{path};
+        }
+        return QStringList();
     }
 };
 

@@ -276,50 +276,15 @@ QPointF DragonWidget::toDragonLocal(const QPoint &widgetPos) const
                    (widgetPos.y() - cy) / m_breathScale);
 }
 
-qreal DragonWidget::coilOffsetAt(qreal t) const
-{
-    const qreal baseAmp = (m_mood == Mood::Sleeping) ? 2.5 : 6.5;
-    const qreal boostAmp = 9.0 * m_coilBoost;
-    const qreal amp = baseAmp + boostAmp;
-    const qreal speed = 1.8 + 1.2 * m_coilBoost;
-
-    const qreal wave = amp * qSin(m_time * speed + t * M_PI * 2.6);
-    const qreal spiral = amp * 0.38 * qSin(m_time * speed * 0.65 - t * M_PI * 1.5 + 1.1);
-    return wave + spiral;
-}
-
-QPointF DragonWidget::spritePointAt(qreal t, qreal nx) const
-{
-    const QRectF r = m_spriteRect;
-    return QPointF(r.left() + r.width() * nx + coilOffsetAt(t), r.top() + t * r.height());
-}
-
-QPointF DragonWidget::untwistLocal(const QPointF &local) const
+DragonWidget::HitRegion DragonWidget::hitTest(const QPointF &local) const
 {
     const QRectF r = dragonDrawRect();
     if (!r.contains(local)) {
-        return local;
-    }
-    const qreal t = qBound(0.0, (local.y() - r.top()) / r.height(), 1.0);
-    return QPointF(local.x() - coilOffsetAt(t), local.y());
-}
-
-void DragonWidget::boostCoil(HitRegion region)
-{
-    Q_UNUSED(region)
-    m_coilBoost = 1.0;
-}
-
-DragonWidget::HitRegion DragonWidget::hitTest(const QPointF &local) const
-{
-    const QPointF p = untwistLocal(local);
-    const QRectF r = dragonDrawRect();
-    if (!r.contains(p)) {
         return HitRegion::None;
     }
 
-    const qreal nx = (p.x() - r.left()) / r.width();
-    const qreal ny = (p.y() - r.top()) / r.height();
+    const qreal nx = (local.x() - r.left()) / r.width();
+    const qreal ny = (local.y() - r.top()) / r.height();
 
     if (nx < 0.42 && ny < 0.42) {
         return HitRegion::Head;
@@ -413,13 +378,12 @@ void DragonWidget::triggerInteraction(HitRegion region)
 {
     wakeUp();
     m_idleSeconds = 0.0;
-    boostCoil(region);
     const QRectF r = dragonDrawRect();
 
     switch (region) {
     case HitRegion::Head:
         setMood(Mood::Majestic);
-        spawnAuraPulse(spritePointAt(0.22, 0.18));
+        spawnAuraPulse(QPointF(r.left() + r.width() * 0.18, r.top() + r.height() * 0.22));
         emitBodyMist(10);
         showBubble(QStringLiteral("触龙首者，当思其威。"));
         break;
@@ -431,7 +395,7 @@ void DragonWidget::triggerInteraction(HitRegion region)
         break;
     case HitRegion::Tail:
         setMood(Mood::Majestic);
-        spawnAuraPulse(spritePointAt(0.82, 0.62));
+        spawnAuraPulse(QPointF(r.left() + r.width() * 0.72, r.top() + r.height() * 0.82));
         emitBodyMist(10);
         showBubble(QStringLiteral("撼龙尾者，天地为之色变！"));
         break;
@@ -449,7 +413,7 @@ void DragonWidget::feedDragon()
     m_foods.clear();
     Food food;
     const QRectF r = dragonDrawRect();
-    food.pos = spritePointAt(0.06, 0.15);
+    food.pos = QPointF(r.left() + r.width() * 0.15, r.top() + r.height() * 0.05);
     food.vy = 0.0;
     m_foods.append(food);
     showBubble(QStringLiteral("吞珠纳云，威势更盛。"), 2200);
@@ -483,7 +447,7 @@ void DragonWidget::updateFood(qreal dt)
         food.vy += 130.0 * dt;
         food.pos.setY(food.pos.y() + food.vy * dt);
         const QRectF r = dragonDrawRect();
-        if (food.pos.y() >= spritePointAt(0.22, 0.18).y()) {
+        if (food.pos.y() >= r.top() + r.height() * 0.18) {
             food.eaten = true;
             emitBodyMist(8);
         }
@@ -603,10 +567,6 @@ void DragonWidget::onAnimTick()
         }
     }
 
-    if (m_coilBoost > 0.01) {
-        m_coilBoost = qMax(0.0, m_coilBoost - dt * 0.45);
-    }
-
     updateAura(dt);
     updateFood(dt);
     updateClouds(dt);
@@ -705,30 +665,7 @@ void DragonWidget::drawDragonSprite(QPainter &painter)
         painter.drawEllipse(dragonCenter(), m_spriteRect.width() * 0.5, m_spriteRect.height() * 0.45);
     }
 
-    const QRectF r = m_spriteRect;
-    const int imgH = m_dragonPixmap.height();
-    const int imgW = m_dragonPixmap.width();
-    const qreal stripH = imgH / qreal(kCoilStrips);
-
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-
-    for (int i = 0; i < kCoilStrips; ++i) {
-        const int sy = int(i * stripH);
-        int sh = (i == kCoilStrips - 1) ? imgH - sy : int(stripH) + 1;
-        sh = qMin(sh, imgH - sy);
-        if (sh <= 0) {
-            continue;
-        }
-
-        const qreal t = (i + 0.5) / kCoilStrips;
-        const qreal dx = coilOffsetAt(t);
-        const qreal destY = r.top() + sy * r.height() / imgH;
-        const qreal destH = sh * r.height() / imgH;
-
-        const QRectF dest(r.left() + dx, destY, r.width(), destH);
-        painter.drawPixmap(dest, m_dragonPixmap, QRect(0, sy, imgW, sh));
-    }
-
+    painter.drawPixmap(m_spriteRect.topLeft(), m_dragonPixmap);
     painter.restore();
 }
 
@@ -812,7 +749,8 @@ void DragonWidget::drawSleepEffect(QPainter &painter)
 
 void DragonWidget::drawFire(QPainter &painter, qreal intensity)
 {
-    const QPointF mouth = spritePointAt(0.26, 0.12);
+    const QRectF r = dragonDrawRect();
+    const QPointF mouth(r.left() + r.width() * 0.10, r.top() + r.height() * 0.30);
 
     painter.save();
     painter.translate(mouth);
@@ -916,7 +854,6 @@ void DragonWidget::mouseDoubleClickEvent(QMouseEvent *event)
         m_breathingFire = true;
         m_fireIntensity = 0.0;
         m_fireStartTime = m_time;
-        boostCoil(HitRegion::Body);
         emitBodyMist(12);
         showBubble(QStringLiteral("龙吟震天，云火焚空！"));
         event->accept();

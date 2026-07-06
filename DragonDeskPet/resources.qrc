@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
         <file>resources/dragon.png</file>
+        <file>resources/dragon_cutout.png</file>
     </qresource>
 </RCC>

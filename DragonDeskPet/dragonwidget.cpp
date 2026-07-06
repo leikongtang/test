@@ -43,18 +43,159 @@ void drawCloudBlob(QPainter &p, const QPointF &c, qreal w, qreal h, qreal alpha)
     p.drawEllipse(c + QPointF(-w * 0.35, h * 0.12), w * 0.5, h * 0.45);
 }
 
-QImage fadeImageBottom(const QImage &source, qreal fadeStartRatio)
+QImage extractDragonFromBackground(const QImage &source)
 {
     QImage img = source.convertToFormat(QImage::Format_ARGB32);
-    const int fadeStart = int(img.height() * fadeStartRatio);
-    for (int y = fadeStart; y < img.height(); ++y) {
-        const qreal factor = 1.0 - qreal(y - fadeStart) / qMax(1, img.height() - fadeStart);
-        for (int x = 0; x < img.width(); ++x) {
+    const int w = img.width();
+    const int h = img.height();
+
+    auto colorDist = [](const QColor &a, const QColor &b) {
+        return qAbs(a.red() - b.red()) + qAbs(a.green() - b.green()) + qAbs(a.blue() - b.blue());
+    };
+
+    auto isDragonPixel = [](const QColor &c) {
+        if (c.alpha() < 10) {
+            return false;
+        }
+        const int maxC = qMax(c.red(), qMax(c.green(), c.blue()));
+        const int minC = qMin(c.red(), qMin(c.green(), c.blue()));
+        const int sat = maxC - minC;
+        const int greenDominance = c.green() - qMax(c.red(), c.blue());
+        // 龙身：绿色主导或高饱和暖色（须、角）
+        if (greenDominance > 8 && c.green() > 60) {
+            return true;
+        }
+        if (sat > 35 && c.green() >= c.red() - 20) {
+            return true;
+        }
+        // 保留白色龙腹、牙齿
+        if (maxC > 180 && sat < 40 && c.green() >= c.red() - 15) {
+            return true;
+        }
+        return false;
+    };
+
+    auto isBackgroundPixel = [&](const QColor &c) {
+        if (isDragonPixel(c)) {
+            return false;
+        }
+        const int maxC = qMax(c.red(), qMax(c.green(), c.blue()));
+        const int minC = qMin(c.red(), qMin(c.green(), c.blue()));
+        const int sat = maxC - minC;
+        const int brightness = (c.red() + c.green() + c.blue()) / 3;
+        // 天空、云雾、雪山：亮且低饱和，或偏蓝灰
+        if (brightness > 165 && sat < 55) {
+            return true;
+        }
+        if (c.blue() >= c.red() && c.blue() >= c.green() - 10 && brightness > 120 && sat < 70) {
+            return true;
+        }
+        if (brightness > 130 && sat < 30) {
+            return true;
+        }
+        return false;
+    };
+
+    QVector<int> labels(w * h, 0);
+    int nextLabel = 1;
+    struct Seed { int x; int y; QColor color; };
+    QVector<Seed> seeds;
+
+    auto pushSeed = [&](int x, int y) {
+        if (x < 0 || y < 0 || x >= w || y >= h) {
+            return;
+        }
+        const QColor c = img.pixelColor(x, y);
+        if (isBackgroundPixel(c)) {
+            seeds.append({x, y, c});
+        }
+    };
+
+    for (int x = 0; x < w; ++x) {
+        pushSeed(x, 0);
+        pushSeed(x, h - 1);
+    }
+    for (int y = 0; y < h; ++y) {
+        pushSeed(0, y);
+        pushSeed(w - 1, y);
+    }
+
+    const int tolerance = 48;
+    for (const Seed &seed : seeds) {
+        const int sx = seed.x;
+        const int sy = seed.y;
+        const int idx = sy * w + sx;
+        if (labels[idx] != 0) {
+            continue;
+        }
+        const int label = nextLabel++;
+        QVector<QPoint> stack;
+        stack.append(QPoint(sx, sy));
+        labels[idx] = label;
+
+        while (!stack.isEmpty()) {
+            const QPoint p = stack.takeLast();
+            const QColor pc = img.pixelColor(p.x(), p.y());
+            const int neighbors[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            for (auto &n : neighbors) {
+                const int nx = p.x() + n[0];
+                const int ny = p.y() + n[1];
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h) {
+                    continue;
+                }
+                const int nidx = ny * w + nx;
+                if (labels[nidx] != 0) {
+                    continue;
+                }
+                const QColor nc = img.pixelColor(nx, ny);
+                if (isDragonPixel(nc)) {
+                    continue;
+                }
+                if (colorDist(pc, nc) <= tolerance || isBackgroundPixel(nc)) {
+                    labels[nidx] = label;
+                    stack.append(QPoint(nx, ny));
+                }
+            }
+        }
+    }
+
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
             QColor c = img.pixelColor(x, y);
-            c.setAlpha(int(c.alpha() * factor * factor));
+            if (isBackgroundPixel(c) || labels[y * w + x] != 0) {
+                c.setAlpha(0);
+            } else if (isDragonPixel(c)) {
+                c.setAlpha(255);
+            } else {
+                // 边缘过渡像素：按与最近背景色的距离软抠
+                const int alpha = qBound(40, 255 - colorDist(c, QColor(220, 230, 240)), 255);
+                c.setAlpha(alpha);
+            }
             img.setPixelColor(x, y, c);
         }
     }
+
+    // 裁切透明边距
+    int minX = w, minY = h, maxX = 0, maxY = 0;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            if (img.pixelColor(x, y).alpha() > 20) {
+                minX = qMin(minX, x);
+                minY = qMin(minY, y);
+                maxX = qMax(maxX, x);
+                maxY = qMax(maxY, y);
+            }
+        }
+    }
+    if (maxX > minX && maxY > minY) {
+        const int pad = 8;
+        minX = qMax(0, minX - pad);
+        minY = qMax(0, minY - pad);
+        maxX = qMin(w - 1, maxX + pad);
+        maxY = qMin(h - 1, maxY + pad);
+        img = img.copy(minX, minY, maxX - minX + 1, maxY - minY + 1);
+    }
+
     return img;
 }
 
@@ -63,7 +204,7 @@ QImage fadeImageBottom(const QImage &source, qreal fadeStartRatio)
 DragonWidget::DragonWidget(QWidget *parent)
     : QWidget(parent)
 {
-    setFixedSize(380, 360);
+    setFixedSize(340, 320);
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
@@ -92,15 +233,18 @@ DragonWidget::DragonWidget(QWidget *parent)
 
 bool DragonWidget::loadDragonSprite()
 {
-    QImage raw(QStringLiteral(":/resources/dragon.png"));
+    QImage raw(QStringLiteral(":/resources/dragon_cutout.png"));
     if (raw.isNull()) {
-        return false;
+        QImage original(QStringLiteral(":/resources/dragon.png"));
+        if (original.isNull()) {
+            return false;
+        }
+        raw = extractDragonFromBackground(original);
     }
 
-    const QImage faded = fadeImageBottom(raw, 0.72);
-    m_dragonPixmap = QPixmap::fromImage(faded);
+    m_dragonPixmap = QPixmap::fromImage(raw);
 
-    const qreal targetW = 340.0;
+    const qreal targetW = 300.0;
     const qreal scale = targetW / m_dragonPixmap.width();
     const qreal targetH = m_dragonPixmap.height() * scale;
     m_dragonPixmap = m_dragonPixmap.scaled(int(targetW), int(targetH),

@@ -36,6 +36,10 @@
   - 使用 `resources/dragon.png` 东方神龙插画
   - 底部渐隐透明，与桌面融合
   - 保留云雾粒子、威仪光环、全部互动
+- **龙身抠图透明背景**
+  - 预生成 `resources/dragon_cutout.png`（仅龙身）
+  - 启动时加载抠图精灵，云雾由程序绘制
+  - `tools/cutout_dragon.py` 可重新生成抠图
 
 ## 使用说明
 1. 编译 Release 后运行 `DragonDeskPet/build-release/release/DragonDeskPet.exe`

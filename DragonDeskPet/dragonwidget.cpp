@@ -276,15 +276,80 @@ QPointF DragonWidget::toDragonLocal(const QPoint &widgetPos) const
                    (widgetPos.y() - cy) / m_breathScale);
 }
 
-DragonWidget::HitRegion DragonWidget::hitTest(const QPointF &local) const
+qreal DragonWidget::twistOffsetAt(qreal t) const
+{
+    const qreal idleAmp = (m_mood == Mood::Sleeping) ? 2.5 : 5.5;
+    const qreal burstAmp = 22.0 * m_twistBurst;
+    const qreal amp = idleAmp + burstAmp;
+    const qreal speed = m_twistWaveSpeed + 5.0 * m_twistBurst;
+
+    const qreal wave = amp * qSin(m_time * speed + t * 9.5);
+    const qreal ripple = burstAmp * 0.55 * qSin(m_time * (speed * 1.6) + (t - m_twistOrigin) * 16.0)
+                         * qExp(-qAbs(t - m_twistOrigin) * 2.2);
+    return wave + ripple;
+}
+
+qreal DragonWidget::twistRotationAt(qreal t) const
+{
+    const qreal base = twistOffsetAt(t + 0.02) - twistOffsetAt(t - 0.02);
+    return base * 0.35;
+}
+
+QPointF DragonWidget::spritePointAt(qreal t, qreal nx) const
+{
+    const QRectF r = m_spriteRect;
+    const qreal dx = twistOffsetAt(t);
+    const qreal rot = twistRotationAt(t);
+    const QPointF center(r.left() + r.width() * nx + dx, r.top() + t * r.height());
+    const QPointF offset((r.width() * nx - r.width() * 0.5), 0);
+    const qreal cosR = qCos(qDegreesToRadians(rot));
+    const qreal sinR = qSin(qDegreesToRadians(rot));
+    return center + QPointF(offset.x() * cosR - offset.y() * sinR,
+                            offset.x() * sinR + offset.y() * cosR);
+}
+
+QPointF DragonWidget::untwistLocal(const QPointF &local) const
 {
     const QRectF r = dragonDrawRect();
     if (!r.contains(local)) {
+        return local;
+    }
+    const qreal t = qBound(0.0, (local.y() - r.top()) / r.height(), 1.0);
+    return QPointF(local.x() - twistOffsetAt(t), local.y());
+}
+
+void DragonWidget::triggerBodyTwist(HitRegion region)
+{
+    m_twistBurst = 1.0;
+    m_twistWaveSpeed = 4.5;
+    switch (region) {
+    case HitRegion::Head:
+        m_twistOrigin = 0.18;
+        m_twistWaveSpeed = 5.5;
+        break;
+    case HitRegion::Body:
+        m_twistOrigin = 0.5;
+        break;
+    case HitRegion::Tail:
+        m_twistOrigin = 0.82;
+        m_twistWaveSpeed = 5.0;
+        break;
+    default:
+        m_twistOrigin = 0.5;
+        break;
+    }
+}
+
+DragonWidget::HitRegion DragonWidget::hitTest(const QPointF &local) const
+{
+    const QPointF p = untwistLocal(local);
+    const QRectF r = dragonDrawRect();
+    if (!r.contains(p)) {
         return HitRegion::None;
     }
 
-    const qreal nx = (local.x() - r.left()) / r.width();
-    const qreal ny = (local.y() - r.top()) / r.height();
+    const qreal nx = (p.x() - r.left()) / r.width();
+    const qreal ny = (p.y() - r.top()) / r.height();
 
     if (nx < 0.42 && ny < 0.42) {
         return HitRegion::Head;
@@ -378,12 +443,13 @@ void DragonWidget::triggerInteraction(HitRegion region)
 {
     wakeUp();
     m_idleSeconds = 0.0;
+    triggerBodyTwist(region);
     const QRectF r = dragonDrawRect();
 
     switch (region) {
     case HitRegion::Head:
         setMood(Mood::Majestic);
-        spawnAuraPulse(QPointF(r.left() + r.width() * 0.18, r.top() + r.height() * 0.22));
+        spawnAuraPulse(spritePointAt(0.22, 0.18));
         emitBodyMist(10);
         showBubble(QStringLiteral("触龙首者，当思其威。"));
         break;
@@ -395,7 +461,7 @@ void DragonWidget::triggerInteraction(HitRegion region)
         break;
     case HitRegion::Tail:
         setMood(Mood::Majestic);
-        spawnAuraPulse(QPointF(r.left() + r.width() * 0.72, r.top() + r.height() * 0.82));
+        spawnAuraPulse(spritePointAt(0.82, 0.65));
         emitBodyMist(10);
         showBubble(QStringLiteral("撼龙尾者，天地为之色变！"));
         break;
@@ -413,7 +479,7 @@ void DragonWidget::feedDragon()
     m_foods.clear();
     Food food;
     const QRectF r = dragonDrawRect();
-    food.pos = QPointF(r.left() + r.width() * 0.15, r.top() + r.height() * 0.05);
+    food.pos = spritePointAt(0.08, 0.15);
     food.vy = 0.0;
     m_foods.append(food);
     showBubble(QStringLiteral("吞珠纳云，威势更盛。"), 2200);
@@ -447,7 +513,7 @@ void DragonWidget::updateFood(qreal dt)
         food.vy += 130.0 * dt;
         food.pos.setY(food.pos.y() + food.vy * dt);
         const QRectF r = dragonDrawRect();
-        if (food.pos.y() >= r.top() + r.height() * 0.18) {
+        if (food.pos.y() >= spritePointAt(0.22, 0.18).y()) {
             food.eaten = true;
             emitBodyMist(8);
         }
@@ -567,6 +633,11 @@ void DragonWidget::onAnimTick()
         }
     }
 
+    if (m_twistBurst > 0.01) {
+        m_twistBurst = qMax(0.0, m_twistBurst - dt * 0.55);
+    }
+    m_twistWaveSpeed = 3.0 + 2.5 * m_twistBurst;
+
     updateAura(dt);
     updateFood(dt);
     updateClouds(dt);
@@ -665,7 +736,36 @@ void DragonWidget::drawDragonSprite(QPainter &painter)
         painter.drawEllipse(dragonCenter(), m_spriteRect.width() * 0.5, m_spriteRect.height() * 0.45);
     }
 
-    painter.drawPixmap(m_spriteRect.topLeft(), m_dragonPixmap);
+    const QRectF r = m_spriteRect;
+    const int imgH = m_dragonPixmap.height();
+    const int imgW = m_dragonPixmap.width();
+    const qreal stripH = imgH / qreal(kBodyStrips);
+
+    for (int i = 0; i < kBodyStrips; ++i) {
+        const int sy = int(i * stripH);
+        const int sh = (i == kBodyStrips - 1) ? imgH - sy : int(stripH);
+        if (sh <= 0) {
+            continue;
+        }
+
+        const qreal t = (i + 0.5) / kBodyStrips;
+        const qreal dx = twistOffsetAt(t);
+        const qreal rot = twistRotationAt(t);
+        const qreal destY = r.top() + sy * r.height() / imgH;
+        const qreal destH = sh * r.height() / imgH;
+
+        QRectF dest(r.left() + dx, destY, r.width(), destH);
+        const QRect src(0, sy, imgW, sh);
+
+        painter.save();
+        const QPointF pivot = dest.center();
+        painter.translate(pivot);
+        painter.rotate(rot);
+        painter.translate(-pivot);
+        painter.drawPixmap(dest, m_dragonPixmap, src);
+        painter.restore();
+    }
+
     painter.restore();
 }
 
@@ -749,11 +849,11 @@ void DragonWidget::drawSleepEffect(QPainter &painter)
 
 void DragonWidget::drawFire(QPainter &painter, qreal intensity)
 {
-    const QRectF r = dragonDrawRect();
-    const QPointF mouth(r.left() + r.width() * 0.10, r.top() + r.height() * 0.30);
+    const QPointF mouth = spritePointAt(0.26, 0.12);
 
     painter.save();
     painter.translate(mouth);
+    painter.rotate(twistRotationAt(0.26));
 
     for (int i = 0; i < 8; ++i) {
         const qreal spread = (i - 3.5) * 8.0;
@@ -854,6 +954,9 @@ void DragonWidget::mouseDoubleClickEvent(QMouseEvent *event)
         m_breathingFire = true;
         m_fireIntensity = 0.0;
         m_fireStartTime = m_time;
+        triggerBodyTwist(HitRegion::Body);
+        m_twistBurst = 1.0;
+        m_twistOrigin = 0.35;
         emitBodyMist(12);
         showBubble(QStringLiteral("龙吟震天，云火焚空！"));
         event->accept();

@@ -40,15 +40,16 @@ private:
 
     enum class Mood {
         Normal,
-        Happy,
+        Majestic,
         Sleeping,
         Eating
     };
 
-    struct Heart {
-        QPointF pos;
+    struct AuraRing {
+        QPointF center;
+        qreal radius = 10.0;
         qreal life = 1.0;
-        qreal vy = -40.0;
+        qreal maxRadius = 40.0;
     };
 
     struct Food {
@@ -62,6 +63,16 @@ private:
         qreal size = 12.0;
         qreal alpha = 0.5;
         qreal drift = 0.0;
+        bool wrapsBody = false;
+        qreal bodyT = -1.0;
+    };
+
+    struct MistParticle {
+        QPointF pos;
+        QPointF vel;
+        qreal size = 8.0;
+        qreal life = 1.0;
+        qreal alpha = 0.6;
     };
 
     QPointF toDragonLocal(const QPoint &widgetPos) const;
@@ -73,18 +84,24 @@ private:
     void wakeUp();
     void feedDragon();
     void sayRandomLine();
-    void spawnHearts(int count);
-    void updateHearts(qreal dt);
+    void spawnAuraPulse(const QPointF &center);
+    void emitBodyMist(int count = 3);
+    void emitDragMist();
+    void updateAura(qreal dt);
     void updateFood(qreal dt);
     void updateClouds(qreal dt);
+    void updateMist(qreal dt);
     void updateFollowMouse(qreal dt);
     void updateMood(qreal dt);
-    void drawClouds(QPainter &painter);
+    void drawBackgroundMist(QPainter &painter);
+    void drawBodyWrapMist(QPainter &painter, bool behindDragon);
+    void drawMistParticles(QPainter &painter);
+    void drawDragonShadow(QPainter &painter);
     void drawDragon(QPainter &painter);
     void drawDragonHead(QPainter &painter, const QPointF &headPos, qreal headAngle);
     void drawFire(QPainter &painter, qreal intensity);
+    void drawAuraRings(QPainter &painter);
     void drawBubble(QPainter &painter);
-    void drawHearts(QPainter &painter);
     void drawFood(QPainter &painter);
     void drawSleepEffect(QPainter &painter);
     void scheduleNextBlink();
@@ -95,6 +112,7 @@ private:
 
     QPoint m_dragOffset;
     QPoint m_pressPos;
+    QPoint m_lastGlobalPos;
     QPointF m_localMouse;
     bool m_dragging = false;
     bool m_mouseOver = false;
@@ -111,19 +129,21 @@ private:
     qreal m_fireStartTime = -1.0;
     qreal m_bounceY = 0.0;
     qreal m_headTilt = 0.0;
-    qreal m_happyTimer = 0.0;
+    qreal m_majesticTimer = 0.0;
     qreal m_eatTimer = 0.0;
     qreal m_bubbleAlpha = 0.0;
     qreal m_bubbleTimer = 0.0;
     qreal m_idleSeconds = 0.0;
     qreal m_pupilX = 0.0;
     qreal m_pupilY = 0.0;
-    qreal m_glowAlpha = 0.0;
+    qreal m_auraAlpha = 0.0;
+    qreal m_mistEmitTimer = 0.0;
 
     QString m_bubbleText;
-    QVector<Heart> m_hearts;
+    QVector<AuraRing> m_auras;
     QVector<Food> m_foods;
     QVector<CloudPuff> m_clouds;
+    QVector<MistParticle> m_mists;
 };
 
 #endif // DRAGONWIDGET_H

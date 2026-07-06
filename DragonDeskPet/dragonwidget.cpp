@@ -204,7 +204,7 @@ QImage extractDragonFromBackground(const QImage &source)
 DragonWidget::DragonWidget(QWidget *parent)
     : QWidget(parent)
 {
-    setFixedSize(340, 320);
+    setFixedSize(320, 340);
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
@@ -235,7 +235,7 @@ bool DragonWidget::loadDragonSprite()
 {
     QImage raw(QStringLiteral(":/resources/dragon_cutout.png"));
     if (raw.isNull()) {
-        QImage original(QStringLiteral(":/resources/dragon.png"));
+        QImage original(QStringLiteral(":/resources/dragon_2d.png"));
         if (original.isNull()) {
             return false;
         }
@@ -244,7 +244,7 @@ bool DragonWidget::loadDragonSprite()
 
     m_dragonPixmap = QPixmap::fromImage(raw);
 
-    const qreal targetW = 300.0;
+    const qreal targetW = 280.0;
     const qreal scale = targetW / m_dragonPixmap.width();
     const qreal targetH = m_dragonPixmap.height() * scale;
     m_dragonPixmap = m_dragonPixmap.scaled(int(targetW), int(targetH),
@@ -286,13 +286,13 @@ DragonWidget::HitRegion DragonWidget::hitTest(const QPointF &local) const
     const qreal nx = (local.x() - r.left()) / r.width();
     const qreal ny = (local.y() - r.top()) / r.height();
 
-    if (nx > 0.42 && ny < 0.38) {
+    if (nx < 0.42 && ny < 0.42) {
         return HitRegion::Head;
     }
-    if (nx < 0.38 && ny > 0.62) {
+    if (nx > 0.52 && ny > 0.68) {
         return HitRegion::Tail;
     }
-    if (ny > 0.18 && ny < 0.82) {
+    if (nx > 0.08 && nx < 0.92 && ny > 0.12 && ny < 0.92) {
         return HitRegion::Body;
     }
     return HitRegion::None;
@@ -383,7 +383,7 @@ void DragonWidget::triggerInteraction(HitRegion region)
     switch (region) {
     case HitRegion::Head:
         setMood(Mood::Majestic);
-        spawnAuraPulse(QPointF(r.left() + r.width() * 0.65, r.top() + r.height() * 0.22));
+        spawnAuraPulse(QPointF(r.left() + r.width() * 0.18, r.top() + r.height() * 0.22));
         emitBodyMist(10);
         showBubble(QStringLiteral("触龙首者，当思其威。"));
         break;
@@ -395,7 +395,7 @@ void DragonWidget::triggerInteraction(HitRegion region)
         break;
     case HitRegion::Tail:
         setMood(Mood::Majestic);
-        spawnAuraPulse(QPointF(r.left() + r.width() * 0.25, r.top() + r.height() * 0.78));
+        spawnAuraPulse(QPointF(r.left() + r.width() * 0.72, r.top() + r.height() * 0.82));
         emitBodyMist(10);
         showBubble(QStringLiteral("撼龙尾者，天地为之色变！"));
         break;
@@ -413,7 +413,7 @@ void DragonWidget::feedDragon()
     m_foods.clear();
     Food food;
     const QRectF r = dragonDrawRect();
-    food.pos = QPointF(r.left() + r.width() * 0.58, r.top() + r.height() * 0.12);
+    food.pos = QPointF(r.left() + r.width() * 0.15, r.top() + r.height() * 0.05);
     food.vy = 0.0;
     m_foods.append(food);
     showBubble(QStringLiteral("吞珠纳云，威势更盛。"), 2200);
@@ -447,7 +447,7 @@ void DragonWidget::updateFood(qreal dt)
         food.vy += 130.0 * dt;
         food.pos.setY(food.pos.y() + food.vy * dt);
         const QRectF r = dragonDrawRect();
-        if (food.pos.y() >= r.top() + r.height() * 0.2) {
+        if (food.pos.y() >= r.top() + r.height() * 0.18) {
             food.eaten = true;
             emitBodyMist(8);
         }
@@ -750,34 +750,34 @@ void DragonWidget::drawSleepEffect(QPainter &painter)
 void DragonWidget::drawFire(QPainter &painter, qreal intensity)
 {
     const QRectF r = dragonDrawRect();
-    const QPointF mouth(r.left() + r.width() * 0.52, r.top() + r.height() * 0.28);
+    const QPointF mouth(r.left() + r.width() * 0.10, r.top() + r.height() * 0.30);
 
     painter.save();
     painter.translate(mouth);
 
     for (int i = 0; i < 8; ++i) {
-        const qreal spread = (i - 3.5) * 10.0;
-        const qreal puff = qSin(m_time * 3.5 + i) * 6.0;
-        drawCloudBlob(painter, QPointF(spread * 0.4, -8 + puff),
-                      24 * intensity, 16 * intensity, 0.55 * intensity);
+        const qreal spread = (i - 3.5) * 8.0;
+        const qreal puff = qSin(m_time * 3.5 + i) * 5.0;
+        drawCloudBlob(painter, QPointF(-18 - spread * 0.3, -6 + puff),
+                      22 * intensity, 14 * intensity, 0.55 * intensity);
     }
 
     for (int i = 0; i < 6; ++i) {
-        const qreal spread = (i - 2.5) * 9.0;
-        const qreal flicker = qSin(m_time * 9.0 + i) * 5.0;
-        const qreal flameH = (32.0 + flicker) * intensity;
-        const qreal flameW = 11.0 * intensity;
+        const qreal spread = (i - 2.5) * 7.0;
+        const qreal flicker = qSin(m_time * 9.0 + i) * 4.0;
+        const qreal flameH = (28.0 + flicker) * intensity;
+        const qreal flameW = 10.0 * intensity;
 
         QPainterPath flame;
-        flame.moveTo(spread - flameW * 0.5, 0);
-        flame.cubicTo(spread - flameW, -flameH * 0.35,
-                      spread, -flameH,
-                      spread + flameW * 0.4, -flameH * 1.12);
-        flame.cubicTo(spread + flameW, -flameH * 0.45,
-                      spread + flameW * 0.5, 0,
-                      spread + flameW * 0.5, 0);
+        flame.moveTo(spread - flameW * 0.3, 0);
+        flame.cubicTo(-flameW + spread, -flameH * 0.3,
+                      -flameW * 1.1 + spread, -flameH * 0.7,
+                      -flameW * 1.3 + spread, -flameH);
+        flame.cubicTo(-flameW * 0.8 + spread, -flameH * 0.5,
+                      spread, -flameH * 0.2,
+                      spread - flameW * 0.3, 0);
 
-        QLinearGradient grad(spread, 0, spread, -flameH);
+        QLinearGradient grad(spread, 0, -flameW + spread, -flameH);
         grad.setColorAt(0.0, QColor(255, 250, 180, int(230 * intensity)));
         grad.setColorAt(0.35, QColor(255, 180, 50, int(210 * intensity)));
         grad.setColorAt(0.7, QColor(255, 80, 20, int(120 * intensity)));

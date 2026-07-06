@@ -79,6 +79,10 @@ private:
     QPointF dragonCenter() const;
     QPointF toDragonLocal(const QPoint &widgetPos) const;
     HitRegion hitTest(const QPointF &local) const;
+    qreal coilOffsetAt(qreal t) const;
+    QPointF spritePointAt(qreal t, qreal nx = 0.5) const;
+    QPointF untwistLocal(const QPointF &local) const;
+    void boostCoil(HitRegion region);
     void triggerInteraction(HitRegion region);
     void showBubble(const QString &text, int durationMs = 2500);
     void setMood(Mood mood);
@@ -106,6 +110,8 @@ private:
     QTimer m_animTimer;
     QTimer m_idleTimer;
 
+    static constexpr int kCoilStrips = 48;
+
     QPixmap m_dragonPixmap;
     QRectF m_spriteRect;
 
@@ -122,6 +128,7 @@ private:
     qreal m_time = 0.0;
     qreal m_breathScale = 1.0;
     qreal m_swayAngle = 0.0;
+    qreal m_coilBoost = 0.0;
     qreal m_fireIntensity = 0.0;
     qreal m_fireStartTime = -1.0;
     qreal m_bounceY = 0.0;

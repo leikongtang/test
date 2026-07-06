@@ -7,13 +7,13 @@
 #include <QEvent>
 #include <QFont>
 #include <QFontMetrics>
+#include <QImage>
 #include <QLineF>
 #include <QLinearGradient>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
-#include <QPainterPathStroker>
 #include <QRadialGradient>
 #include <QtMath>
 
@@ -33,8 +33,8 @@ const char *kRandomLines[] = {
 void drawCloudBlob(QPainter &p, const QPointF &c, qreal w, qreal h, qreal alpha)
 {
     QRadialGradient g(c, qMax(w, h));
-    g.setColorAt(0.0, QColor(255, 255, 255, int(200 * alpha)));
-    g.setColorAt(0.45, QColor(235, 242, 250, int(120 * alpha)));
+    g.setColorAt(0.0, QColor(255, 255, 255, int(210 * alpha)));
+    g.setColorAt(0.45, QColor(235, 242, 250, int(130 * alpha)));
     g.setColorAt(1.0, QColor(210, 225, 240, 0));
     p.setBrush(g);
     p.setPen(Qt::NoPen);
@@ -43,90 +43,115 @@ void drawCloudBlob(QPainter &p, const QPointF &c, qreal w, qreal h, qreal alpha)
     p.drawEllipse(c + QPointF(-w * 0.35, h * 0.12), w * 0.5, h * 0.45);
 }
 
+QImage fadeImageBottom(const QImage &source, qreal fadeStartRatio)
+{
+    QImage img = source.convertToFormat(QImage::Format_ARGB32);
+    const int fadeStart = int(img.height() * fadeStartRatio);
+    for (int y = fadeStart; y < img.height(); ++y) {
+        const qreal factor = 1.0 - qreal(y - fadeStart) / qMax(1, img.height() - fadeStart);
+        for (int x = 0; x < img.width(); ++x) {
+            QColor c = img.pixelColor(x, y);
+            c.setAlpha(int(c.alpha() * factor * factor));
+            img.setPixelColor(x, y, c);
+        }
+    }
+    return img;
+}
+
 } // namespace
 
 DragonWidget::DragonWidget(QWidget *parent)
     : QWidget(parent)
 {
-    setFixedSize(360, 340);
+    setFixedSize(380, 360);
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
 
-    for (int i = 0; i < 18; ++i) {
+    loadDragonSprite();
+
+    for (int i = 0; i < 16; ++i) {
         CloudPuff cloud;
-        cloud.pos = QPointF(-140.0 + (qrand() % 280), -100.0 + (qrand() % 200));
-        cloud.size = 16.0 + (qrand() % 35);
-        cloud.alpha = 0.18 + (qrand() % 35) / 100.0;
-        cloud.drift = 0.2 + (qrand() % 6) / 10.0;
-        cloud.wrapsBody = (i % 3 == 0);
-        if (cloud.wrapsBody) {
-            cloud.bodyT = 0.1 + (qrand() % 80) / 100.0;
-        }
+        cloud.pos = QPointF(-150.0 + (qrand() % 300), -110.0 + (qrand() % 220));
+        cloud.size = 18.0 + (qrand() % 40);
+        cloud.alpha = 0.15 + (qrand() % 40) / 100.0;
+        cloud.drift = 0.15 + (qrand() % 8) / 10.0;
         m_clouds.append(cloud);
     }
 
     connect(&m_animTimer, &QTimer::timeout, this, &DragonWidget::onAnimTick);
     m_animTimer.start(33);
 
-    connect(&m_blinkTimer, &QTimer::timeout, this, &DragonWidget::onBlink);
-    scheduleNextBlink();
-
     connect(&m_idleTimer, &QTimer::timeout, this, &DragonWidget::onIdleCheck);
     m_idleTimer.start(1000);
 
     m_lastGlobalPos = pos();
-    m_auraAlpha = 0.35;
+    m_auraAlpha = 0.3;
     showBubble(QStringLiteral("神龙降世，云雾随行。"), 3000);
 }
 
-QPainterPath DragonWidget::buildSpinePath() const
+bool DragonWidget::loadDragonSprite()
 {
-    const qreal amp = (m_mood == Mood::Majestic) ? 11.0
-                      : (m_mood == Mood::Sleeping ? 2.0 : 7.0);
-    const qreal wave = amp * qSin(m_time * 1.4);
-    const qreal wave2 = (amp * 0.5) * qSin(m_time * 1.9 + 0.8);
+    QImage raw(QStringLiteral(":/resources/dragon.png"));
+    if (raw.isNull()) {
+        return false;
+    }
 
-    QPainterPath path;
-    path.moveTo(72, -68);
-    path.cubicTo(38 + wave * 0.15, -48, -28 - wave * 0.35, -22, -62 + wave, 6);
-    path.cubicTo(-38 - wave2 * 0.25, 38, 28 + wave * 0.4, 62, 58 + m_tailWave, 92);
-    return path;
+    const QImage faded = fadeImageBottom(raw, 0.72);
+    m_dragonPixmap = QPixmap::fromImage(faded);
+
+    const qreal targetW = 340.0;
+    const qreal scale = targetW / m_dragonPixmap.width();
+    const qreal targetH = m_dragonPixmap.height() * scale;
+    m_dragonPixmap = m_dragonPixmap.scaled(int(targetW), int(targetH),
+                                           Qt::KeepAspectRatio,
+                                           Qt::SmoothTransformation);
+
+    m_spriteRect = QRectF(-m_dragonPixmap.width() / 2.0,
+                          -m_dragonPixmap.height() / 2.0 + 10.0,
+                          m_dragonPixmap.width(),
+                          m_dragonPixmap.height());
+    return true;
+}
+
+QRectF DragonWidget::dragonDrawRect() const
+{
+    return m_spriteRect;
+}
+
+QPointF DragonWidget::dragonCenter() const
+{
+    return m_spriteRect.center();
 }
 
 QPointF DragonWidget::toDragonLocal(const QPoint &widgetPos) const
 {
     const qreal cx = width() / 2.0;
-    const qreal cy = height() / 2.0 + 8.0 + m_bounceY;
+    const qreal cy = height() / 2.0 + m_bounceY;
     return QPointF((widgetPos.x() - cx) / m_breathScale,
                    (widgetPos.y() - cy) / m_breathScale);
 }
 
 DragonWidget::HitRegion DragonWidget::hitTest(const QPointF &local) const
 {
-    const QPainterPath spine = buildSpinePath();
-    qreal bestDist = 999.0;
-    qreal bestT = 0.5;
-
-    for (qreal t = 0.0; t <= 1.0; t += 0.04) {
-        const QPointF pt = spine.pointAtPercent(t);
-        const qreal dist = QLineF(local, pt).length();
-        if (dist < bestDist) {
-            bestDist = dist;
-            bestT = t;
-        }
-    }
-
-    if (bestDist > 32.0) {
+    const QRectF r = dragonDrawRect();
+    if (!r.contains(local)) {
         return HitRegion::None;
     }
-    if (bestT < 0.14) {
+
+    const qreal nx = (local.x() - r.left()) / r.width();
+    const qreal ny = (local.y() - r.top()) / r.height();
+
+    if (nx > 0.42 && ny < 0.38) {
         return HitRegion::Head;
     }
-    if (bestT > 0.84) {
+    if (nx < 0.38 && ny > 0.62) {
         return HitRegion::Tail;
     }
-    return HitRegion::Body;
+    if (ny > 0.18 && ny < 0.82) {
+        return HitRegion::Body;
+    }
+    return HitRegion::None;
 }
 
 void DragonWidget::setMood(Mood mood)
@@ -136,7 +161,10 @@ void DragonWidget::setMood(Mood mood)
         m_majesticTimer = 2.8;
         m_auraAlpha = 1.0;
     } else if (mood == Mood::Normal) {
-        m_auraAlpha = 0.35;
+        m_auraAlpha = 0.3;
+        m_sleepAlpha = 1.0;
+    } else if (mood == Mood::Sleeping) {
+        m_sleepAlpha = 0.55;
     }
 }
 
@@ -146,7 +174,7 @@ void DragonWidget::wakeUp()
         setMood(Mood::Majestic);
         showBubble(QStringLiteral("何人惊扰神龙？"), 2200);
         m_idleSeconds = 0.0;
-        emitBodyMist(8);
+        emitBodyMist(10);
     }
 }
 
@@ -161,44 +189,43 @@ void DragonWidget::spawnAuraPulse(const QPointF &center)
 {
     AuraRing ring;
     ring.center = center;
-    ring.radius = 8.0;
-    ring.maxRadius = 55.0;
+    ring.radius = 12.0;
+    ring.maxRadius = 70.0;
     ring.life = 1.0;
     m_auras.append(ring);
 }
 
 void DragonWidget::emitBodyMist(int count)
 {
-    if (m_mists.size() > 120) {
+    if (m_mists.size() > 100) {
         return;
     }
-    const QPainterPath spine = buildSpinePath();
+    const QRectF r = dragonDrawRect();
     for (int i = 0; i < count; ++i) {
-        const qreal t = 0.05 + (qrand() % 90) / 100.0;
-        const QPointF pt = spine.pointAtPercent(t);
         MistParticle m;
-        m.pos = pt + QPointF((qrand() % 20) - 10, (qrand() % 16) - 8);
-        m.vel = QPointF((qrand() % 10) - 5, -8.0 - (qrand() % 12));
-        m.size = 10.0 + (qrand() % 18);
+        m.pos = QPointF(r.left() + (qrand() % int(r.width())),
+                        r.top() + (qrand() % int(r.height())));
+        m.vel = QPointF((qrand() % 12) - 6, -10.0 - (qrand() % 10));
+        m.size = 12.0 + (qrand() % 22);
         m.life = 1.0;
-        m.alpha = 0.35 + (qrand() % 30) / 100.0;
+        m.alpha = 0.3 + (qrand() % 35) / 100.0;
         m_mists.append(m);
     }
 }
 
 void DragonWidget::emitDragMist()
 {
-    if (m_mists.size() > 120) {
+    if (m_mists.size() > 100) {
         return;
     }
-    const QPainterPath spine = buildSpinePath();
-    for (qreal t = 0.2; t < 0.9; t += 0.25) {
+    const QRectF r = dragonDrawRect();
+    for (int i = 0; i < 4; ++i) {
         MistParticle m;
-        m.pos = spine.pointAtPercent(t);
-        m.vel = QPointF(-12.0 - (qrand() % 8), (qrand() % 6) - 3);
-        m.size = 14.0 + (qrand() % 12);
-        m.life = 0.9;
-        m.alpha = 0.45;
+        m.pos = r.center() + QPointF((qrand() % 80) - 40, (qrand() % 40) - 20);
+        m.vel = QPointF(-14.0 - (qrand() % 10), (qrand() % 8) - 4);
+        m.size = 16.0 + (qrand() % 14);
+        m.life = 0.95;
+        m.alpha = 0.5;
         m_mists.append(m);
     }
 }
@@ -207,27 +234,25 @@ void DragonWidget::triggerInteraction(HitRegion region)
 {
     wakeUp();
     m_idleSeconds = 0.0;
-    const QPainterPath spine = buildSpinePath();
+    const QRectF r = dragonDrawRect();
 
     switch (region) {
     case HitRegion::Head:
         setMood(Mood::Majestic);
-        spawnAuraPulse(spine.pointAtPercent(0.0));
-        emitBodyMist(8);
+        spawnAuraPulse(QPointF(r.left() + r.width() * 0.65, r.top() + r.height() * 0.22));
+        emitBodyMist(10);
         showBubble(QStringLiteral("触龙首者，当思其威。"));
-        m_headTilt = (m_localMouse.x() > 0 ? 4.0 : -4.0);
         break;
     case HitRegion::Body:
         setMood(Mood::Majestic);
-        spawnAuraPulse(spine.pointAtPercent(0.45));
-        emitBodyMist(6);
+        spawnAuraPulse(r.center());
+        emitBodyMist(8);
         showBubble(QStringLiteral("龙躯不动，风云自生。"));
         break;
     case HitRegion::Tail:
         setMood(Mood::Majestic);
-        m_tailWave = 18.0;
-        spawnAuraPulse(spine.pointAtPercent(1.0));
-        emitBodyMist(8);
+        spawnAuraPulse(QPointF(r.left() + r.width() * 0.25, r.top() + r.height() * 0.78));
+        emitBodyMist(10);
         showBubble(QStringLiteral("撼龙尾者，天地为之色变！"));
         break;
     default:
@@ -243,7 +268,8 @@ void DragonWidget::feedDragon()
     m_eatTimer = 2.0;
     m_foods.clear();
     Food food;
-    food.pos = QPointF(72, -88);
+    const QRectF r = dragonDrawRect();
+    food.pos = QPointF(r.left() + r.width() * 0.58, r.top() + r.height() * 0.12);
     food.vy = 0.0;
     m_foods.append(food);
     showBubble(QStringLiteral("吞珠纳云，威势更盛。"), 2200);
@@ -259,10 +285,10 @@ void DragonWidget::sayRandomLine()
 void DragonWidget::updateAura(qreal dt)
 {
     for (int i = m_auras.size() - 1; i >= 0; --i) {
-        AuraRing &r = m_auras[i];
-        r.radius += 45.0 * dt;
-        r.life -= dt * 0.55;
-        if (r.life <= 0.0 || r.radius > r.maxRadius) {
+        AuraRing &ring = m_auras[i];
+        ring.radius += 50.0 * dt;
+        ring.life -= dt * 0.5;
+        if (ring.life <= 0.0 || ring.radius > ring.maxRadius) {
             m_auras.removeAt(i);
         }
     }
@@ -274,9 +300,10 @@ void DragonWidget::updateFood(qreal dt)
         if (food.eaten) {
             continue;
         }
-        food.vy += 140.0 * dt;
+        food.vy += 130.0 * dt;
         food.pos.setY(food.pos.y() + food.vy * dt);
-        if (food.pos.y() >= -58.0) {
+        const QRectF r = dragonDrawRect();
+        if (food.pos.y() >= r.top() + r.height() * 0.2) {
             food.eaten = true;
             emitBodyMist(8);
         }
@@ -285,20 +312,12 @@ void DragonWidget::updateFood(qreal dt)
 
 void DragonWidget::updateClouds(qreal dt)
 {
-    const QPainterPath spine = buildSpinePath();
     for (CloudPuff &cloud : m_clouds) {
-        if (cloud.wrapsBody && cloud.bodyT >= 0.0) {
-            const QPointF bodyPt = spine.pointAtPercent(cloud.bodyT);
-            const qreal wrap = 12.0 * qSin(m_time * 1.2 + cloud.bodyT * 8.0);
-            cloud.pos = bodyPt + QPointF(wrap, 8.0 + wrap * 0.3);
-            cloud.alpha = 0.22 + 0.12 * (1.0 + qSin(m_time * 1.8 + cloud.drift * 5.0));
-        } else {
-            cloud.pos.setX(cloud.pos.x() + cloud.drift * dt * 6.0);
-            cloud.pos.setY(cloud.pos.y() - cloud.drift * dt * 2.5);
-            cloud.alpha = 0.12 + 0.1 * (1.0 + qSin(m_time * 1.2 + cloud.drift * 4.0));
-            if (cloud.pos.x() > 160.0) {
-                cloud.pos.setX(-160.0);
-            }
+        cloud.pos.setX(cloud.pos.x() + cloud.drift * dt * 5.0);
+        cloud.pos.setY(cloud.pos.y() - cloud.drift * dt * 2.0);
+        cloud.alpha = 0.14 + 0.1 * (1.0 + qSin(m_time * 1.1 + cloud.drift * 4.0));
+        if (cloud.pos.x() > 170.0) {
+            cloud.pos.setX(-170.0);
         }
     }
 }
@@ -309,10 +328,10 @@ void DragonWidget::updateMist(qreal dt)
         MistParticle &m = m_mists[i];
         m.pos += m.vel * dt;
         m.vel.setX(m.vel.x() * 0.98);
-        m.vel.setY(m.vel.y() - 6.0 * dt);
-        m.size += 8.0 * dt;
-        m.life -= dt * 0.45;
-        m.alpha *= 0.992;
+        m.vel.setY(m.vel.y() - 5.0 * dt);
+        m.size += 10.0 * dt;
+        m.life -= dt * 0.4;
+        m.alpha *= 0.993;
         if (m.life <= 0.0) {
             m_mists.removeAt(i);
         }
@@ -351,28 +370,18 @@ void DragonWidget::updateMood(qreal dt)
         m_eatTimer -= dt;
         if (m_eatTimer <= 0.0 && m_mood == Mood::Eating) {
             setMood(Mood::Majestic);
-            spawnAuraPulse(QPointF(0, 0));
+            spawnAuraPulse(dragonCenter());
         }
     }
 
-    if (m_auraAlpha > 0.35 && m_mood != Mood::Majestic) {
-        m_auraAlpha = qMax(0.35, m_auraAlpha - dt * 0.4);
+    if (m_auraAlpha > 0.3 && m_mood != Mood::Majestic) {
+        m_auraAlpha = qMax(0.3, m_auraAlpha - dt * 0.35);
     }
 
     if (m_bubbleTimer > 0.0) {
         m_bubbleTimer -= dt;
     } else if (m_bubbleAlpha > 0.0) {
         m_bubbleAlpha = qMax(0.0, m_bubbleAlpha - dt * 1.8);
-    }
-
-    m_tailWave *= 0.94;
-
-    if (m_mood == Mood::Sleeping) {
-        m_headTilt = 6.0;
-    } else if (m_mouseOver) {
-        m_headTilt = qBound(-6.0, m_localMouse.x() * 0.04, 6.0);
-    } else {
-        m_headTilt *= 0.92;
     }
 }
 
@@ -382,14 +391,13 @@ void DragonWidget::onAnimTick()
     m_time += dt;
 
     if (m_mood == Mood::Sleeping) {
-        m_breathScale = 1.0 + 0.008 * qSin(m_time * 0.8);
-        m_bounceY = 1.0 * qSin(m_time * 0.5);
-        m_bodyWave = 1.5 * qSin(m_time * 0.9);
-        m_eyesClosed = true;
+        m_breathScale = 1.0 + 0.006 * qSin(m_time * 0.7);
+        m_bounceY = 1.0 * qSin(m_time * 0.45);
+        m_swayAngle = 0.4 * qSin(m_time * 0.6);
     } else {
-        m_breathScale = 1.0 + 0.012 * qSin(m_time * 1.2);
-        m_bounceY = 2.5 * qSin(m_time * 0.9);
-        m_bodyWave = (m_mood == Mood::Majestic ? 9.0 : 6.0) * qSin(m_time * 1.6);
+        m_breathScale = 1.0 + 0.01 * qSin(m_time * 1.1);
+        m_bounceY = (m_mood == Mood::Majestic ? 3.5 : 2.0) * qSin(m_time * 0.85);
+        m_swayAngle = 0.8 * qSin(m_time * 0.9);
     }
 
     if (m_breathingFire) {
@@ -401,18 +409,8 @@ void DragonWidget::onAnimTick()
         m_fireIntensity = qMax(0.0, m_fireIntensity - 0.04);
     }
 
-    if (m_mouseOver && m_mood != Mood::Sleeping) {
-        const qreal dx = qBound(-2.5, m_localMouse.x() * 0.04, 2.5);
-        const qreal dy = qBound(-1.5, m_localMouse.y() * 0.03, 1.5);
-        m_pupilX += (dx - m_pupilX) * 0.12;
-        m_pupilY += (dy - m_pupilY) * 0.12;
-    } else {
-        m_pupilX *= 0.9;
-        m_pupilY *= 0.9;
-    }
-
     m_mistEmitTimer += dt;
-    if (m_mistEmitTimer > 0.18) {
+    if (m_mistEmitTimer > 0.2) {
         m_mistEmitTimer = 0.0;
         emitBodyMist(2);
     }
@@ -435,23 +433,6 @@ void DragonWidget::onAnimTick()
     update();
 }
 
-void DragonWidget::onBlink()
-{
-    if (m_mood == Mood::Sleeping) {
-        scheduleNextBlink();
-        return;
-    }
-    m_eyesClosed = true;
-    update();
-    QTimer::singleShot(80, this, [this]() {
-        if (m_mood != Mood::Sleeping) {
-            m_eyesClosed = false;
-        }
-        update();
-        scheduleNextBlink();
-    });
-}
-
 void DragonWidget::onIdleCheck()
 {
     if (m_mouseOver || m_dragging || m_mood == Mood::Eating) {
@@ -465,30 +446,24 @@ void DragonWidget::onIdleCheck()
     }
 }
 
-void DragonWidget::scheduleNextBlink()
-{
-    m_blinkTimer.start(5000 + qrand() % 6000);
-}
-
 void DragonWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event)
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
 
     drawBubble(painter);
 
-    painter.translate(width() / 2.0, height() / 2.0 + 8.0 + m_bounceY);
+    painter.translate(width() / 2.0, height() / 2.0 + m_bounceY);
     painter.scale(m_breathScale, m_breathScale);
+    painter.rotate(m_swayAngle);
 
     drawBackgroundMist(painter);
-    drawBodyWrapMist(painter, true);
-    drawDragonShadow(painter);
-    drawDragon(painter);
-    drawBodyWrapMist(painter, false);
-    drawMistParticles(painter);
     drawAuraRings(painter);
+    drawDragonSprite(painter);
+    drawMistParticles(painter);
     drawFood(painter);
 
     if (m_mood == Mood::Sleeping) {
@@ -504,35 +479,16 @@ void DragonWidget::drawBackgroundMist(QPainter &painter)
 {
     painter.save();
     const QVector<QPointF> anchors = {
-        QPointF(-90, 20), QPointF(60, -30), QPointF(-40, 70),
-        QPointF(100, 40), QPointF(0, -80), QPointF(-110, -40)
+        QPointF(-100, 30), QPointF(80, -20), QPointF(-50, 90),
+        QPointF(120, 50), QPointF(0, -90), QPointF(-130, -30)
     };
     for (int i = 0; i < anchors.size(); ++i) {
-        const QPointF &a = anchors[i];
-        const qreal pulse = 1.0 + 0.08 * qSin(m_time * 0.8 + i);
-        drawCloudBlob(painter, a, 45 * pulse, 22 * pulse, 0.35 + 0.1 * qSin(m_time + i));
+        const qreal pulse = 1.0 + 0.1 * qSin(m_time * 0.7 + i);
+        drawCloudBlob(painter, anchors[i], 50 * pulse, 26 * pulse,
+                      0.38 + 0.12 * qSin(m_time + i));
     }
     for (const CloudPuff &cloud : m_clouds) {
-        if (!cloud.wrapsBody) {
-            drawCloudBlob(painter, cloud.pos, cloud.size * 1.3, cloud.size * 0.65, cloud.alpha);
-        }
-    }
-    painter.restore();
-}
-
-void DragonWidget::drawBodyWrapMist(QPainter &painter, bool behindDragon)
-{
-    painter.save();
-    for (const CloudPuff &cloud : m_clouds) {
-        if (!cloud.wrapsBody) {
-            continue;
-        }
-        const bool front = cloud.bodyT > 0.45;
-        if (behindDragon == front) {
-            continue;
-        }
-        drawCloudBlob(painter, cloud.pos, cloud.size, cloud.size * 0.55,
-                      cloud.alpha * (behindDragon ? 0.7 : 1.0));
+        drawCloudBlob(painter, cloud.pos, cloud.size * 1.3, cloud.size * 0.65, cloud.alpha);
     }
     painter.restore();
 }
@@ -546,19 +502,26 @@ void DragonWidget::drawMistParticles(QPainter &painter)
     painter.restore();
 }
 
-void DragonWidget::drawDragonShadow(QPainter &painter)
+void DragonWidget::drawDragonSprite(QPainter &painter)
 {
-    const QPainterPath spine = buildSpinePath();
-    QPainterPathStroker s;
-    s.setWidth(34.0);
-    s.setCapStyle(Qt::RoundCap);
-    s.setJoinStyle(Qt::RoundJoin);
-    QPainterPath shadow = s.createStroke(spine);
+    if (m_dragonPixmap.isNull()) {
+        return;
+    }
+
     painter.save();
-    painter.translate(4, 6);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(0, 30, 25, 45));
-    painter.drawPath(shadow);
+    painter.setOpacity(m_sleepAlpha);
+
+    if (m_auraAlpha > 0.01) {
+        QRadialGradient glow(dragonCenter(), m_spriteRect.width() * 0.55);
+        glow.setColorAt(0.0, QColor(100, 200, 160, int(70 * m_auraAlpha)));
+        glow.setColorAt(0.7, QColor(60, 140, 110, int(25 * m_auraAlpha)));
+        glow.setColorAt(1.0, QColor(40, 100, 80, 0));
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(glow);
+        painter.drawEllipse(dragonCenter(), m_spriteRect.width() * 0.5, m_spriteRect.height() * 0.45);
+    }
+
+    painter.drawPixmap(m_spriteRect.topLeft(), m_dragonPixmap);
     painter.restore();
 }
 
@@ -566,23 +529,11 @@ void DragonWidget::drawAuraRings(QPainter &painter)
 {
     painter.save();
     for (const AuraRing &r : m_auras) {
-        QPen pen(QColor(180, 220, 160, int(160 * r.life)));
-        pen.setWidthF(2.0);
+        QPen pen(QColor(180, 220, 160, int(170 * r.life)));
+        pen.setWidthF(2.5);
         painter.setPen(pen);
         painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(r.center, r.radius, r.radius * 0.65);
-    }
-
-    if (m_auraAlpha > 0.01) {
-        const QPainterPath spine = buildSpinePath();
-        const QPointF head = spine.pointAtPercent(0.0);
-        QRadialGradient aura(head, 70);
-        aura.setColorAt(0.0, QColor(120, 200, 160, int(90 * m_auraAlpha)));
-        aura.setColorAt(0.6, QColor(80, 160, 130, int(40 * m_auraAlpha)));
-        aura.setColorAt(1.0, QColor(60, 120, 100, 0));
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(aura);
-        painter.drawEllipse(head, 70, 55);
+        painter.drawEllipse(r.center, r.radius, r.radius * 0.6);
     }
     painter.restore();
 }
@@ -637,293 +588,52 @@ void DragonWidget::drawFood(QPainter &painter)
         painter.setBrush(pearl);
         painter.setPen(QPen(QColor(160, 130, 30), 1.2));
         painter.drawEllipse(food.pos, 11, 11);
-        painter.setBrush(QColor(255, 255, 255, 200));
-        painter.setPen(Qt::NoPen);
-        painter.drawEllipse(QPointF(food.pos.x() - 3, food.pos.y() - 4), 4, 3);
     }
 }
 
 void DragonWidget::drawSleepEffect(QPainter &painter)
 {
     painter.save();
-    for (int i = 0; i < 5; ++i) {
-        const qreal x = 20.0 + i * 18;
-        const qreal y = -85.0 - i * 8 + 4.0 * qSin(m_time * 1.5 + i);
-        drawCloudBlob(painter, QPointF(x, y), 14 + i * 2, 8, 0.25 + 0.1 * qSin(m_time + i));
-    }
-    painter.restore();
-}
-
-void DragonWidget::drawDragon(QPainter &painter)
-{
-    const QPainterPath spine = buildSpinePath();
-
-    QPainterPathStroker stroker;
-    stroker.setWidth(34.0);
-    stroker.setCapStyle(Qt::RoundCap);
-    stroker.setJoinStyle(Qt::RoundJoin);
-    const QPainterPath bodyOutline = stroker.createStroke(spine);
-
-    QLinearGradient bodyGrad(-80, -50, 90, 100);
-    bodyGrad.setColorAt(0.0, QColor(8, 55, 42));
-    bodyGrad.setColorAt(0.25, QColor(18, 95, 72));
-    bodyGrad.setColorAt(0.55, QColor(28, 130, 98));
-    bodyGrad.setColorAt(0.78, QColor(45, 165, 125));
-    bodyGrad.setColorAt(1.0, QColor(12, 70, 55));
-    painter.setPen(QPen(QColor(5, 35, 28), 2.0));
-    painter.setBrush(bodyGrad);
-    painter.drawPath(bodyOutline);
-
-    // 鳞光高光
-    painter.save();
-    painter.setClipPath(bodyOutline);
-    QLinearGradient sheen(-60, -80, 80, 60);
-    sheen.setColorAt(0.0, QColor(255, 255, 255, 0));
-    sheen.setColorAt(0.35, QColor(180, 255, 220, 35));
-    sheen.setColorAt(0.5, QColor(255, 255, 255, 0));
-    painter.fillRect(QRectF(-120, -120, 240, 240), sheen);
-    painter.restore();
-
-    QPainterPathStroker bellyStroker;
-    bellyStroker.setWidth(16.0);
-    bellyStroker.setCapStyle(Qt::RoundCap);
-    bellyStroker.setJoinStyle(Qt::RoundJoin);
-    const QPainterPath bellyPath = bellyStroker.createStroke(spine);
-    QLinearGradient bellyGrad(0, -20, 0, 100);
-    bellyGrad.setColorAt(0.0, QColor(252, 250, 238));
-    bellyGrad.setColorAt(0.5, QColor(240, 230, 200));
-    bellyGrad.setColorAt(1.0, QColor(220, 205, 165));
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(bellyGrad);
-    painter.drawPath(bellyPath);
-
-    painter.save();
-    painter.setPen(QPen(QColor(10, 70, 52, 100), 1.2));
-    for (qreal t = 0.06; t < 0.94; t += 0.055) {
-        const QPointF pt = spine.pointAtPercent(t);
-        const QPointF tan = spine.pointAtPercent(qMin(1.0, t + 0.015))
-                            - spine.pointAtPercent(qMax(0.0, t - 0.015));
-        const qreal angle = qAtan2(tan.y(), tan.x()) * 180.0 / M_PI;
-        painter.save();
-        painter.translate(pt);
-        painter.rotate(angle);
-        painter.drawArc(QRectF(-8, -6, 16, 11), 20 * 16, 140 * 16);
-        painter.restore();
-    }
-    painter.restore();
-
-    // 背脊长鬃
-    painter.save();
-    for (qreal t = 0.04; t < 0.9; t += 0.06) {
-        const QPointF pt = spine.pointAtPercent(t);
-        const QPointF tan = spine.pointAtPercent(qMin(1.0, t + 0.02))
-                            - spine.pointAtPercent(qMax(0.0, t - 0.02));
-        const qreal angle = qAtan2(tan.y(), tan.x());
-        const QPointF normal(-qSin(angle), qCos(angle));
-        const qreal maneWave = 5.0 * qSin(m_time * 2.2 + t * 10.0);
-        const QPointF tip = pt + normal * (-20.0 + maneWave);
-
-        QLinearGradient maneGrad(pt, tip);
-        maneGrad.setColorAt(0.0, QColor(25, 110, 85));
-        maneGrad.setColorAt(0.5, QColor(40, 150, 115));
-        maneGrad.setColorAt(1.0, QColor(70, 190, 150, 160));
-        QPainterPath mane;
-        mane.moveTo(pt + normal * (-5));
-        mane.cubicTo(pt + normal * (-12) + QPointF(maneWave, 0), tip,
-                     pt + QPointF(qCos(angle), qSin(angle)) * 6 + normal * (-3));
-        mane.closeSubpath();
-        painter.setBrush(maneGrad);
-        painter.setPen(Qt::NoPen);
-        painter.drawPath(mane);
-    }
-    painter.restore();
-
-    const QVector<qreal> clawPositions = {0.2, 0.42, 0.64};
-    for (qreal t : clawPositions) {
-        const QPointF pt = spine.pointAtPercent(t);
-        const QPointF tan = spine.pointAtPercent(qMin(1.0, t + 0.02)) - pt;
-        const qreal angle = qAtan2(tan.y(), tan.x()) * 180.0 / M_PI;
-        painter.save();
-        painter.translate(pt);
-        painter.rotate(angle + 90);
-        painter.setBrush(QColor(15, 70, 55));
-        painter.setPen(QPen(QColor(8, 40, 32), 1.2));
-        for (int c = -1; c <= 1; c += 2) {
-            painter.drawEllipse(QRectF(c * 12 - 4, 10, 8, 12));
-            painter.drawLine(QPointF(c * 12, 20), QPointF(c * 15, 28));
-            painter.drawLine(QPointF(c * 12 + 2, 20), QPointF(c * 17, 26));
-            painter.drawLine(QPointF(c * 12 - 2, 20), QPointF(c * 13, 27));
-        }
-        painter.restore();
-    }
-
-    const QPointF tailTip = spine.pointAtPercent(1.0);
-    const QPointF tailTan = tailTip - spine.pointAtPercent(0.9);
-    const qreal tailAngle = qAtan2(tailTan.y(), tailTan.x()) * 180.0 / M_PI;
-    painter.save();
-    painter.translate(tailTip);
-    painter.rotate(tailAngle + m_tailWave);
-    QPainterPath tailFin;
-    tailFin.moveTo(0, 0);
-    tailFin.cubicTo(-10, 16, -24, 24, -32, 10);
-    tailFin.cubicTo(-20, 0, -10, -4, 0, 0);
-    painter.setBrush(QColor(20, 100, 78));
-    painter.setPen(QPen(QColor(8, 45, 35), 1.2));
-    painter.drawPath(tailFin);
-    painter.restore();
-
-    const QPointF headPos = spine.pointAtPercent(0.0);
-    const QPointF headTan = spine.pointAtPercent(0.035) - headPos;
-    const qreal headAngle = qAtan2(headTan.y(), headTan.x()) * 180.0 / M_PI + m_headTilt;
-    drawDragonHead(painter, headPos, headAngle);
-}
-
-void DragonWidget::drawDragonHead(QPainter &painter, const QPointF &headPos, qreal headAngle)
-{
-    painter.save();
-    painter.translate(headPos);
-    painter.rotate(headAngle);
-    painter.rotate(-38.0);
-
-    QPainterPath skull;
-    skull.moveTo(6, 2);
-    skull.cubicTo(20, -10, 36, -8, 42, 4);
-    skull.cubicTo(46, 14, 36, 22, 20, 20);
-    skull.cubicTo(8, 18, 0, 10, 6, 2);
-    QLinearGradient headGrad(0, -12, 0, 22);
-    headGrad.setColorAt(0.0, QColor(35, 145, 110));
-    headGrad.setColorAt(0.5, QColor(22, 100, 78));
-    headGrad.setColorAt(1.0, QColor(12, 65, 50));
-    painter.setBrush(headGrad);
-    painter.setPen(QPen(QColor(5, 30, 22), 2.0));
-    painter.drawPath(skull);
-
-    QPainterPath snout;
-    snout.moveTo(34, 4);
-    snout.cubicTo(50, 2, 56, 8, 52, 14);
-    snout.cubicTo(46, 18, 36, 14, 34, 4);
-    painter.setBrush(QColor(45, 160, 125));
-    painter.setPen(QPen(QColor(8, 40, 32), 1.5));
-    painter.drawPath(snout);
-
-    // 张口露齿
-    painter.setBrush(QColor(25, 15, 12));
-    QPainterPath jaw;
-    jaw.moveTo(36, 8);
-    jaw.cubicTo(44, 10, 48, 14, 44, 16);
-    jaw.lineTo(34, 14);
-    jaw.closeSubpath();
-    painter.drawPath(jaw);
-    painter.setPen(QColor(235, 230, 210));
+    const QRectF r = dragonDrawRect();
     for (int i = 0; i < 4; ++i) {
-        painter.drawLine(QPointF(37 + i * 2.5, 10), QPointF(37 + i * 2.5, 13));
+        const qreal x = r.left() + r.width() * 0.5 + i * 20;
+        const qreal y = r.top() + 10 - i * 12 + 4.0 * qSin(m_time * 1.4 + i);
+        drawCloudBlob(painter, QPointF(x, y), 16 + i * 3, 9, 0.3);
     }
-
-    painter.setPen(QPen(QColor(210, 235, 225), 1.4, Qt::SolidLine, Qt::RoundCap));
-    const qreal whiskerWave = 4.0 * qSin(m_time * 1.8);
-    for (int i = -1; i <= 1; ++i) {
-        const qreal baseY = 6.0 + i * 4.0;
-        QPainterPath whisker;
-        whisker.moveTo(46, baseY);
-        whisker.cubicTo(58, baseY - 6 + whiskerWave * i,
-                        72, baseY + whiskerWave,
-                        88 + whiskerWave, baseY + i * 5);
-        painter.drawPath(whisker);
-    }
-    painter.drawLine(QPointF(22, 16), QPointF(6, 30 + whiskerWave));
-    painter.drawLine(QPointF(28, 17), QPointF(18, 32 - whiskerWave));
-
-    painter.setPen(QPen(QColor(15, 25, 20), 2.0));
-    painter.setBrush(QColor(20, 35, 28));
-    auto drawAntler = [&](qreal sx, qreal sy, qreal dir) {
-        QPainterPath antler;
-        antler.moveTo(sx, sy);
-        antler.lineTo(sx + dir * 8, sy - 24);
-        antler.lineTo(sx + dir * 4, sy - 12);
-        antler.lineTo(sx + dir * 16, sy - 32);
-        antler.lineTo(sx + dir * 6, sy - 14);
-        antler.lineTo(sx + dir * 12, sy - 28);
-        painter.drawPath(antler);
-    };
-    drawAntler(6, -6, -1);
-    drawAntler(22, -8, 1);
-
-    painter.setPen(Qt::NoPen);
-    for (int i = 0; i < 7; ++i) {
-        const qreal fx = 2 + i * 6;
-        const qreal fw = 3.0 * qSin(m_time * 2.0 + i * 0.8);
-        QPainterPath mane;
-        mane.moveTo(fx, -8);
-        mane.cubicTo(fx - 6 + fw, -22, fx + 4, -30 + fw, fx + 10, -18);
-        mane.cubicTo(fx + 4, -12, fx, -6, fx, -8);
-        QLinearGradient mg(fx, -8, fx, -28);
-        mg.setColorAt(0.0, QColor(30, 120, 92));
-        mg.setColorAt(1.0, QColor(55, 175, 140, 210));
-        painter.setBrush(mg);
-        painter.drawPath(mane);
-    }
-
-    const QPointF eyePos(30, 2);
-    if (m_eyesClosed || m_mood == Mood::Sleeping) {
-        painter.setPen(QPen(QColor(10, 25, 18), 2.5, Qt::SolidLine, Qt::RoundCap));
-        painter.drawLine(QPointF(24, 2), QPointF(36, 2));
-    } else {
-        const qreal glow = 0.65 + 0.35 * qSin(m_time * 2.5);
-        painter.setBrush(QColor(5, 15, 10));
-        painter.setPen(QPen(QColor(3, 10, 8), 1.5));
-        painter.drawEllipse(eyePos, 9, 6);
-
-        painter.setBrush(QColor(int(200 + 40 * glow), int(255), int(180 + 50 * glow)));
-        painter.setPen(Qt::NoPen);
-        painter.drawEllipse(QPointF(eyePos.x() + m_pupilX, eyePos.y() + m_pupilY), 2.5, 4.5);
-
-        painter.setOpacity(0.55 * glow);
-        QRadialGradient eyeGlow(eyePos, 22);
-        eyeGlow.setColorAt(0.0, QColor(200, 255, 180, 140));
-        eyeGlow.setColorAt(0.5, QColor(120, 220, 100, 60));
-        eyeGlow.setColorAt(1.0, QColor(80, 180, 80, 0));
-        painter.setBrush(eyeGlow);
-        painter.drawEllipse(eyePos, 22, 16);
-        painter.setOpacity(1.0);
-    }
-
     painter.restore();
 }
 
 void DragonWidget::drawFire(QPainter &painter, qreal intensity)
 {
-    const QPainterPath spine = buildSpinePath();
-    const QPointF headPos = spine.pointAtPercent(0.0);
-    const QPointF headTan = spine.pointAtPercent(0.035) - headPos;
-    const qreal headAngle = qAtan2(headTan.y(), headTan.x()) * 180.0 / M_PI + m_headTilt;
+    const QRectF r = dragonDrawRect();
+    const QPointF mouth(r.left() + r.width() * 0.52, r.top() + r.height() * 0.28);
 
     painter.save();
-    painter.translate(headPos);
-    painter.rotate(headAngle - 38.0);
+    painter.translate(mouth);
 
     for (int i = 0; i < 8; ++i) {
-        const qreal spread = (i - 3.5) * 9.0;
+        const qreal spread = (i - 3.5) * 10.0;
         const qreal puff = qSin(m_time * 3.5 + i) * 6.0;
-        drawCloudBlob(painter, QPointF(52 + spread * 0.3, -4 + puff),
-                      22 * intensity, 14 * intensity, 0.5 * intensity);
+        drawCloudBlob(painter, QPointF(spread * 0.4, -8 + puff),
+                      24 * intensity, 16 * intensity, 0.55 * intensity);
     }
 
     for (int i = 0; i < 6; ++i) {
-        const qreal spread = (i - 2.5) * 8.0;
-        const qreal flicker = qSin(m_time * 9.0 + i) * 4.0;
-        const qreal flameH = (30.0 + flicker) * intensity;
-        const qreal flameW = 10.0 * intensity;
+        const qreal spread = (i - 2.5) * 9.0;
+        const qreal flicker = qSin(m_time * 9.0 + i) * 5.0;
+        const qreal flameH = (32.0 + flicker) * intensity;
+        const qreal flameW = 11.0 * intensity;
 
         QPainterPath flame;
-        flame.moveTo(48 + spread - flameW * 0.5, 6);
-        flame.cubicTo(48 + spread - flameW, 6 - flameH * 0.35,
-                      48 + spread, 6 - flameH,
-                      48 + spread + flameW * 0.4, 6 - flameH * 1.15);
-        flame.cubicTo(48 + spread + flameW, 6 - flameH * 0.45,
-                      48 + spread + flameW * 0.5, 6,
-                      48 + spread + flameW * 0.5, 6);
+        flame.moveTo(spread - flameW * 0.5, 0);
+        flame.cubicTo(spread - flameW, -flameH * 0.35,
+                      spread, -flameH,
+                      spread + flameW * 0.4, -flameH * 1.12);
+        flame.cubicTo(spread + flameW, -flameH * 0.45,
+                      spread + flameW * 0.5, 0,
+                      spread + flameW * 0.5, 0);
 
-        QLinearGradient grad(48 + spread, 6, 48 + spread, 6 - flameH);
+        QLinearGradient grad(spread, 0, spread, -flameH);
         grad.setColorAt(0.0, QColor(255, 250, 180, int(230 * intensity)));
         grad.setColorAt(0.35, QColor(255, 180, 50, int(210 * intensity)));
         grad.setColorAt(0.7, QColor(255, 80, 20, int(120 * intensity)));
@@ -1000,7 +710,7 @@ void DragonWidget::mouseDoubleClickEvent(QMouseEvent *event)
         m_breathingFire = true;
         m_fireIntensity = 0.0;
         m_fireStartTime = m_time;
-        emitBodyMist(10);
+        emitBodyMist(12);
         showBubble(QStringLiteral("龙吟震天，云火焚空！"));
         event->accept();
     }

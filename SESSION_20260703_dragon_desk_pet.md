@@ -32,6 +32,10 @@
   - 更深色龙鳞 + 金属高光，龙影投射
   - 威仪光环脉冲替代可爱爱心，慢速庄重游动
   - 墨玉金边对话框，龙谕台词更具威严
+- **换用高清参考图精灵**（替换手绘矢量龙）
+  - 使用 `resources/dragon.png` 东方神龙插画
+  - 底部渐隐透明，与桌面融合
+  - 保留云雾粒子、威仪光环、全部互动
 
 ## 使用说明
 1. 编译 Release 后运行 `DragonDeskPet/build-release/release/DragonDeskPet.exe`

@@ -1,8 +1,10 @@
 #ifndef DRAGONWIDGET_H
 #define DRAGONWIDGET_H
 
+#include <QPixmap>
 #include <QPoint>
 #include <QPointF>
+#include <QRectF>
 #include <QString>
 #include <QTimer>
 #include <QVector>
@@ -27,7 +29,6 @@ protected:
 
 private slots:
     void onAnimTick();
-    void onBlink();
     void onIdleCheck();
 
 private:
@@ -49,7 +50,7 @@ private:
         QPointF center;
         qreal radius = 10.0;
         qreal life = 1.0;
-        qreal maxRadius = 40.0;
+        qreal maxRadius = 50.0;
     };
 
     struct Food {
@@ -63,8 +64,6 @@ private:
         qreal size = 12.0;
         qreal alpha = 0.5;
         qreal drift = 0.0;
-        bool wrapsBody = false;
-        qreal bodyT = -1.0;
     };
 
     struct MistParticle {
@@ -75,9 +74,11 @@ private:
         qreal alpha = 0.6;
     };
 
+    bool loadDragonSprite();
+    QRectF dragonDrawRect() const;
+    QPointF dragonCenter() const;
     QPointF toDragonLocal(const QPoint &widgetPos) const;
     HitRegion hitTest(const QPointF &local) const;
-    QPainterPath buildSpinePath() const;
     void triggerInteraction(HitRegion region);
     void showBubble(const QString &text, int durationMs = 2500);
     void setMood(Mood mood);
@@ -94,21 +95,19 @@ private:
     void updateFollowMouse(qreal dt);
     void updateMood(qreal dt);
     void drawBackgroundMist(QPainter &painter);
-    void drawBodyWrapMist(QPainter &painter, bool behindDragon);
     void drawMistParticles(QPainter &painter);
-    void drawDragonShadow(QPainter &painter);
-    void drawDragon(QPainter &painter);
-    void drawDragonHead(QPainter &painter, const QPointF &headPos, qreal headAngle);
+    void drawDragonSprite(QPainter &painter);
     void drawFire(QPainter &painter, qreal intensity);
     void drawAuraRings(QPainter &painter);
     void drawBubble(QPainter &painter);
     void drawFood(QPainter &painter);
     void drawSleepEffect(QPainter &painter);
-    void scheduleNextBlink();
 
     QTimer m_animTimer;
-    QTimer m_blinkTimer;
     QTimer m_idleTimer;
+
+    QPixmap m_dragonPixmap;
+    QRectF m_spriteRect;
 
     QPoint m_dragOffset;
     QPoint m_pressPos;
@@ -117,27 +116,23 @@ private:
     bool m_dragging = false;
     bool m_mouseOver = false;
     bool m_followMouse = false;
-    bool m_eyesClosed = false;
     bool m_breathingFire = false;
 
     Mood m_mood = Mood::Normal;
     qreal m_time = 0.0;
-    qreal m_bodyWave = 0.0;
-    qreal m_tailWave = 0.0;
     qreal m_breathScale = 1.0;
+    qreal m_swayAngle = 0.0;
     qreal m_fireIntensity = 0.0;
     qreal m_fireStartTime = -1.0;
     qreal m_bounceY = 0.0;
-    qreal m_headTilt = 0.0;
     qreal m_majesticTimer = 0.0;
     qreal m_eatTimer = 0.0;
     qreal m_bubbleAlpha = 0.0;
     qreal m_bubbleTimer = 0.0;
     qreal m_idleSeconds = 0.0;
-    qreal m_pupilX = 0.0;
-    qreal m_pupilY = 0.0;
     qreal m_auraAlpha = 0.0;
     qreal m_mistEmitTimer = 0.0;
+    qreal m_sleepAlpha = 1.0;
 
     QString m_bubbleText;
     QVector<AuraRing> m_auras;

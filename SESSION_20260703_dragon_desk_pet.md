@@ -12,9 +12,12 @@
 - 手绘青绿色卡通小龙：角、耳鳍、翅膀、尾巴、背脊
 - 动画：呼吸缩放、上下浮动、摆尾、扇翅、随机眨眼、瞳孔微动
 - 双击喷火特效；左键拖拽移动；右键菜单退出
+- 修复 Qt 平台插件缺失：Release 编译后自动 windeployqt 部署
+- 新增 `deploy.bat` 手动部署脚本
 
 ## 使用说明
-1. 运行 `DragonDeskPet/build-release/release/DragonDeskPet.exe`
+1. 编译 Release 后运行 `DragonDeskPet/build-release/release/DragonDeskPet.exe`
+2. 若提示缺少 Qt platform plugin，执行 `DragonDeskPet/deploy.bat` 或重新编译（已自动部署）
 2. **左键拖拽**移动小龙到任意位置
 3. **双击**触发喷火动画
 4. **右键**打开菜单，选择「退出」关闭桌宠

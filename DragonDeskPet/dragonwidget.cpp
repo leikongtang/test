@@ -3,19 +3,40 @@
 #include <QAction>
 #include <QApplication>
 #include <QContextMenuEvent>
-#include <QPaintEvent>
+#include <QCursor>
+#include <QEvent>
+#include <QFont>
+#include <QFontMetrics>
+#include <QGuiApplication>
+#include <QLineF>
 #include <QLinearGradient>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QRadialGradient>
+#include <QScreen>
 #include <QtMath>
+
+namespace {
+
+const char *kRandomLines[] = {
+    "今天也要加油哦~",
+    "龙龙在此，诸邪退散！",
+    "摸我头会喷火……开玩笑的~",
+    "肚子饿了，要喂食！",
+    "我在看什么呢？",
+    "陪你一起摸鱼~",
+    "呼~呼~",
+    "尾巴不许拽！"
+};
+
+} // namespace
 
 DragonWidget::DragonWidget(QWidget *parent)
     : QWidget(parent)
 {
-    setFixedSize(220, 220);
+    setFixedSize(240, 260);
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
@@ -25,16 +46,238 @@ DragonWidget::DragonWidget(QWidget *parent)
 
     connect(&m_blinkTimer, &QTimer::timeout, this, &DragonWidget::onBlink);
     scheduleNextBlink();
+
+    connect(&m_idleTimer, &QTimer::timeout, this, &DragonWidget::onIdleCheck);
+    m_idleTimer.start(1000);
+
+    showBubble(QStringLiteral("你好，我是龙龙！"), 3000);
+}
+
+QPointF DragonWidget::toDragonLocal(const QPoint &widgetPos) const
+{
+    const qreal cx = width() / 2.0;
+    const qreal cy = height() / 2.0 + 10.0 + m_bounceY;
+    const qreal x = (widgetPos.x() - cx) / m_breathScale;
+    const qreal y = (widgetPos.y() - cy) / m_breathScale;
+    return QPointF(x, y);
+}
+
+DragonWidget::HitRegion DragonWidget::hitTest(const QPointF &local) const
+{
+    const QPointF headCenter(0, -38);
+    if (QLineF(local, headCenter).length() < 32.0) {
+        return HitRegion::Head;
+    }
+
+    const QPointF bodyCenter(0, 8);
+    if (QLineF(local, bodyCenter).length() < 36.0) {
+        return HitRegion::Body;
+    }
+
+    if (local.x() < -20 && local.x() > -90 && local.y() > -5 && local.y() < 35) {
+        return HitRegion::Tail;
+    }
+
+    if (local.x() > -50 && local.x() < 50 && local.y() > -60 && local.y() < 45) {
+        return HitRegion::Body;
+    }
+
+    return HitRegion::None;
+}
+
+void DragonWidget::setMood(Mood mood)
+{
+    m_mood = mood;
+    if (mood == Mood::Happy) {
+        m_happyTimer = 2.5;
+        m_blushAlpha = 1.0;
+    } else if (mood == Mood::Normal) {
+        m_blushAlpha = 0.0;
+    }
+}
+
+void DragonWidget::wakeUp()
+{
+    if (m_mood == Mood::Sleeping) {
+        setMood(Mood::Happy);
+        showBubble(QStringLiteral("嗯？谁叫我~"), 2000);
+        m_idleSeconds = 0.0;
+    }
+}
+
+void DragonWidget::showBubble(const QString &text, int durationMs)
+{
+    m_bubbleText = text;
+    m_bubbleAlpha = 1.0;
+    m_bubbleTimer = durationMs / 1000.0;
+}
+
+void DragonWidget::spawnHearts(int count)
+{
+    for (int i = 0; i < count; ++i) {
+        Heart h;
+        h.pos = QPointF(-15.0 + (qrand() % 30), -50.0 + (qrand() % 20));
+        h.life = 1.0;
+        h.vy = -35.0 - (qrand() % 20);
+        m_hearts.append(h);
+    }
+}
+
+void DragonWidget::triggerInteraction(HitRegion region)
+{
+    wakeUp();
+    m_idleSeconds = 0.0;
+
+    switch (region) {
+    case HitRegion::Head:
+        setMood(Mood::Happy);
+        spawnHearts(4);
+        showBubble(QStringLiteral("摸摸头，好开心~"));
+        m_headTilt = (m_localMouse.x() > 0 ? 8.0 : -8.0);
+        break;
+    case HitRegion::Body:
+        setMood(Mood::Happy);
+        spawnHearts(3);
+        showBubble(QStringLiteral("肚肚好舒服~"));
+        m_bounceY -= 8.0;
+        break;
+    case HitRegion::Tail:
+        setMood(Mood::Happy);
+        m_tailAngle = 25.0;
+        showBubble(QStringLiteral("尾巴会摇得更欢哦！"));
+        break;
+    default:
+        break;
+    }
+}
+
+void DragonWidget::feedDragon()
+{
+    wakeUp();
+    m_idleSeconds = 0.0;
+    setMood(Mood::Eating);
+    m_eatTimer = 2.0;
+    m_foods.clear();
+    Food food;
+    food.pos = QPointF(0, -90);
+    food.vy = 0.0;
+    m_foods.append(food);
+    showBubble(QStringLiteral("啊呜啊呜~"), 2000);
+}
+
+void DragonWidget::sayRandomLine()
+{
+    wakeUp();
+    const int count = int(sizeof(kRandomLines) / sizeof(kRandomLines[0]));
+    showBubble(QString::fromUtf8(kRandomLines[qrand() % count]));
+}
+
+void DragonWidget::updateHearts(qreal dt)
+{
+    for (int i = m_hearts.size() - 1; i >= 0; --i) {
+        Heart &h = m_hearts[i];
+        h.pos.setY(h.pos.y() + h.vy * dt);
+        h.life -= dt * 0.8;
+        if (h.life <= 0.0) {
+            m_hearts.removeAt(i);
+        }
+    }
+}
+
+void DragonWidget::updateFood(qreal dt)
+{
+    for (Food &food : m_foods) {
+        if (food.eaten) {
+            continue;
+        }
+        food.vy += 180.0 * dt;
+        food.pos.setY(food.pos.y() + food.vy * dt);
+        if (food.pos.y() >= -28.0) {
+            food.eaten = true;
+            m_bounceY -= 5.0;
+        }
+    }
+}
+
+void DragonWidget::updateFollowMouse(qreal dt)
+{
+    if (!m_followMouse || m_dragging || m_mood == Mood::Sleeping) {
+        return;
+    }
+
+    const QPoint globalCenter = frameGeometry().center();
+    const QPoint cursor = QCursor::pos();
+    const QLineF line(globalCenter, cursor);
+    if (line.length() < 80.0) {
+        return;
+    }
+
+    const qreal step = qMin(120.0 * dt, line.length() - 60.0);
+    const qreal ratio = step / line.length();
+    const QPoint delta(int((cursor.x() - globalCenter.x()) * ratio),
+                       int((cursor.y() - globalCenter.y()) * ratio));
+    move(pos() + delta);
+}
+
+void DragonWidget::updateMood(qreal dt)
+{
+    if (m_happyTimer > 0.0) {
+        m_happyTimer -= dt;
+        if (m_happyTimer <= 0.0 && m_mood == Mood::Happy) {
+            setMood(Mood::Normal);
+        }
+    }
+
+    if (m_eatTimer > 0.0) {
+        m_eatTimer -= dt;
+        if (m_eatTimer <= 0.0 && m_mood == Mood::Eating) {
+            setMood(Mood::Happy);
+            spawnHearts(2);
+        }
+    }
+
+    if (m_blushAlpha > 0.0 && m_mood != Mood::Happy) {
+        m_blushAlpha = qMax(0.0, m_blushAlpha - dt * 2.0);
+    }
+
+    if (m_bubbleTimer > 0.0) {
+        m_bubbleTimer -= dt;
+        if (m_bubbleTimer <= 0.0) {
+            m_bubbleAlpha = qMax(0.0, m_bubbleAlpha - dt * 2.0);
+        }
+    } else if (m_bubbleAlpha > 0.0) {
+        m_bubbleAlpha = qMax(0.0, m_bubbleAlpha - dt * 2.0);
+    }
+
+    if (m_mood == Mood::Sleeping) {
+        m_headTilt = 12.0;
+    } else if (m_mouseOver) {
+        m_headTilt = qBound(-10.0, m_localMouse.x() * 0.15, 10.0);
+    } else {
+        m_headTilt *= 0.9;
+    }
 }
 
 void DragonWidget::onAnimTick()
 {
-    m_time += 0.033;
+    const qreal dt = 0.033;
+    m_time += dt;
 
-    m_breathScale = 1.0 + 0.03 * qSin(m_time * 2.0);
-    m_tailAngle = 12.0 * qSin(m_time * 3.5);
-    m_wingAngle = 18.0 * qSin(m_time * 5.0);
-    m_bounceY = 4.0 * qSin(m_time * 1.8);
+    if (m_mood == Mood::Sleeping) {
+        m_breathScale = 1.0 + 0.015 * qSin(m_time * 1.2);
+        m_bounceY = 2.0 * qSin(m_time * 0.8);
+        m_tailAngle = 4.0 * qSin(m_time * 1.5);
+        m_wingAngle = 2.0 * qSin(m_time * 1.0);
+        m_eyesClosed = true;
+    } else {
+        m_breathScale = 1.0 + 0.03 * qSin(m_time * 2.0);
+        const qreal bounceAmp = (m_mood == Mood::Happy) ? 7.0 : 4.0;
+        m_bounceY = bounceAmp * qSin(m_time * 1.8);
+        const qreal tailAmp = (m_mood == Mood::Happy) ? 20.0 : 12.0;
+        m_tailAngle = tailAmp * qSin(m_time * (m_mood == Mood::Happy ? 5.0 : 3.5));
+        const qreal wingAmp = (m_mood == Mood::Eating) ? 8.0 : 18.0;
+        m_wingAngle = wingAmp * qSin(m_time * 5.0);
+    }
 
     if (m_breathingFire) {
         m_fireIntensity = qMin(1.0, m_fireIntensity + 0.08);
@@ -45,18 +288,52 @@ void DragonWidget::onAnimTick()
         m_fireIntensity = qMax(0.0, m_fireIntensity - 0.06);
     }
 
+    if (m_mouseOver && m_mood != Mood::Sleeping) {
+        const qreal dx = qBound(-4.0, m_localMouse.x() * 0.12, 4.0);
+        const qreal dy = qBound(-3.0, m_localMouse.y() * 0.08, 3.0);
+        m_pupilX += (dx - m_pupilX) * 0.2;
+        m_pupilY += (dy - m_pupilY) * 0.2;
+    } else {
+        m_pupilX *= 0.85;
+        m_pupilY *= 0.85;
+    }
+
+    updateHearts(dt);
+    updateFood(dt);
+    updateFollowMouse(dt);
+    updateMood(dt);
+
     update();
 }
 
 void DragonWidget::onBlink()
 {
+    if (m_mood == Mood::Sleeping) {
+        scheduleNextBlink();
+        return;
+    }
     m_eyesClosed = true;
     update();
     QTimer::singleShot(120, this, [this]() {
-        m_eyesClosed = false;
+        if (m_mood != Mood::Sleeping) {
+            m_eyesClosed = false;
+        }
         update();
         scheduleNextBlink();
     });
+}
+
+void DragonWidget::onIdleCheck()
+{
+    if (m_mouseOver || m_dragging || m_mood == Mood::Eating) {
+        m_idleSeconds = 0.0;
+        return;
+    }
+    m_idleSeconds += 1.0;
+    if (m_idleSeconds >= 40.0 && m_mood != Mood::Sleeping) {
+        setMood(Mood::Sleeping);
+        showBubble(QStringLiteral("龙龙睡着了……"), 2000);
+    }
 }
 
 void DragonWidget::scheduleNextBlink()
@@ -70,16 +347,106 @@ void DragonWidget::paintEvent(QPaintEvent *event)
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
 
-    painter.translate(width() / 2.0, height() / 2.0 + m_bounceY);
+    drawBubble(painter);
+
+    painter.translate(width() / 2.0, height() / 2.0 + 10.0 + m_bounceY);
     painter.scale(m_breathScale, m_breathScale);
 
     drawDragon(painter);
+    drawHearts(painter);
+    drawFood(painter);
+
+    if (m_mood == Mood::Sleeping) {
+        drawSleepEffect(painter);
+    }
 
     if (m_fireIntensity > 0.01) {
         drawFire(painter, m_fireIntensity);
     }
+}
+
+void DragonWidget::drawBubble(QPainter &painter)
+{
+    if (m_bubbleAlpha <= 0.01 || m_bubbleText.isEmpty()) {
+        return;
+    }
+
+    painter.save();
+    painter.setOpacity(m_bubbleAlpha);
+
+    QFont font = painter.font();
+    font.setPointSize(9);
+    painter.setFont(font);
+
+    const QFontMetrics fm(font);
+    const int textW = fm.horizontalAdvance(m_bubbleText);
+    const int padH = 10;
+    const int padV = 6;
+    const QRect bubbleRect((width() - textW - padH * 2) / 2, 6,
+                           textW + padH * 2, fm.height() + padV * 2);
+
+    QPainterPath bubble;
+    bubble.addRoundedRect(bubbleRect, 8, 8);
+    bubble.moveTo(bubbleRect.center().x() - 6, bubbleRect.bottom());
+    bubble.lineTo(bubbleRect.center().x(), bubbleRect.bottom() + 10);
+    bubble.lineTo(bubbleRect.center().x() + 6, bubbleRect.bottom());
+    bubble.closeSubpath();
+
+    painter.setPen(QPen(QColor(60, 120, 110), 1.2));
+    painter.setBrush(QColor(255, 255, 255, 230));
+    painter.drawPath(bubble);
+
+    painter.setPen(QColor(40, 80, 70));
+    painter.drawText(bubbleRect, Qt::AlignCenter, m_bubbleText);
+    painter.restore();
+}
+
+void DragonWidget::drawHearts(QPainter &painter)
+{
+    painter.save();
+    for (const Heart &h : m_hearts) {
+        painter.setOpacity(h.life);
+        QPainterPath heart;
+        const qreal x = h.pos.x();
+        const qreal y = h.pos.y();
+        const qreal size = 6.0 * h.life;
+        heart.moveTo(x, y + size * 0.3);
+        heart.cubicTo(x - size, y - size * 0.5, x - size * 0.2, y - size, x, y - size * 0.3);
+        heart.cubicTo(x + size * 0.2, y - size, x + size, y - size * 0.5, x, y + size * 0.3);
+        painter.setBrush(QColor(255, 105, 135));
+        painter.setPen(Qt::NoPen);
+        painter.drawPath(heart);
+    }
+    painter.restore();
+}
+
+void DragonWidget::drawFood(QPainter &painter)
+{
+    for (const Food &food : m_foods) {
+        if (food.eaten) {
+            continue;
+        }
+        painter.setBrush(QColor(255, 87, 51));
+        painter.setPen(QPen(QColor(180, 50, 30), 1.0));
+        painter.drawEllipse(food.pos, 10, 10);
+        painter.setBrush(QColor(120, 200, 80));
+        painter.drawEllipse(QPointF(food.pos.x() - 3, food.pos.y() - 8), 5, 4);
+    }
+}
+
+void DragonWidget::drawSleepEffect(QPainter &painter)
+{
+    painter.save();
+    QFont font = painter.font();
+    font.setPointSize(11);
+    font.setBold(true);
+    painter.setFont(font);
+    painter.setPen(QColor(100, 160, 200, int(180 + 60 * qSin(m_time * 2.0))));
+    painter.drawText(QPointF(20, -70), QStringLiteral("Z"));
+    painter.drawText(QPointF(32, -82), QStringLiteral("z"));
+    painter.drawText(QPointF(42, -92), QStringLiteral("z"));
+    painter.restore();
 }
 
 void DragonWidget::drawDragon(QPainter &painter)
@@ -87,6 +454,7 @@ void DragonWidget::drawDragon(QPainter &painter)
     const qreal s = 1.0;
 
     painter.save();
+    painter.rotate(m_headTilt * 0.3);
 
     // 尾巴
     painter.save();
@@ -104,7 +472,6 @@ void DragonWidget::drawDragon(QPainter &painter)
     painter.setPen(QPen(QColor(30, 100, 88), 1.5));
     painter.drawPath(tail);
 
-    // 尾刺
     painter.setBrush(QColor(255, 183, 77));
     painter.setPen(Qt::NoPen);
     for (int i = 0; i < 3; ++i) {
@@ -143,7 +510,6 @@ void DragonWidget::drawDragon(QPainter &painter)
     painter.setPen(QPen(QColor(30, 95, 85), 1.5));
     painter.drawPath(body);
 
-    // 肚皮
     QPainterPath belly;
     belly.addEllipse(QPointF(0, 14 * s), 20 * s, 18 * s);
     painter.setBrush(QColor(255, 224, 130));
@@ -166,38 +532,37 @@ void DragonWidget::drawDragon(QPainter &painter)
     painter.drawPath(frontWing);
     painter.restore();
 
-    // 后腿
     painter.setBrush(QColor(46, 139, 122));
     painter.setPen(QPen(QColor(30, 95, 85), 1.2));
     painter.drawEllipse(QRectF(-22 * s, 28 * s, 14 * s, 10 * s));
     painter.drawEllipse(QRectF(8 * s, 28 * s, 14 * s, 10 * s));
 
-    // 脖子
     QPainterPath neck;
     neck.addEllipse(QPointF(0, -18 * s), 22 * s, 20 * s);
     painter.setBrush(bodyGrad);
     painter.setPen(QPen(QColor(30, 95, 85), 1.5));
     painter.drawPath(neck);
 
-    // 头
     QPainterPath head;
     head.addEllipse(QPointF(0, -38 * s), 30 * s, 28 * s);
     painter.setBrush(bodyGrad);
     painter.drawPath(head);
 
-    // 吻部
     QPainterPath snout;
     snout.addEllipse(QPointF(0, -30 * s), 18 * s, 14 * s);
     painter.setBrush(QColor(90, 200, 175));
     painter.setPen(Qt::NoPen);
     painter.drawPath(snout);
 
-    // 鼻孔
-    painter.setBrush(QColor(30, 80, 70));
-    painter.drawEllipse(QRectF(-5 * s, -32 * s, 4 * s, 3 * s));
-    painter.drawEllipse(QRectF(1 * s, -32 * s, 4 * s, 3 * s));
+    if (m_mood == Mood::Eating) {
+        painter.setBrush(QColor(200, 80, 80));
+        painter.drawEllipse(QRectF(-8 * s, -26 * s, 16 * s, 10 * s));
+    } else {
+        painter.setBrush(QColor(30, 80, 70));
+        painter.drawEllipse(QRectF(-5 * s, -32 * s, 4 * s, 3 * s));
+        painter.drawEllipse(QRectF(1 * s, -32 * s, 4 * s, 3 * s));
+    }
 
-    // 角
     painter.setBrush(QColor(255, 183, 77));
     painter.setPen(QPen(QColor(220, 150, 50), 1.0));
     QPainterPath hornL;
@@ -213,7 +578,6 @@ void DragonWidget::drawDragon(QPainter &painter)
     hornR.closeSubpath();
     painter.drawPath(hornR);
 
-    // 耳鳍
     painter.setBrush(QColor(255, 138, 101));
     painter.setPen(Qt::NoPen);
     QPainterPath finL;
@@ -229,22 +593,33 @@ void DragonWidget::drawDragon(QPainter &painter)
     finR.closeSubpath();
     painter.drawPath(finR);
 
-    // 眼睛
     const qreal eyeY = -42 * s;
     const qreal eyeRX = 11 * s;
     const qreal eyeLX = -11 * s;
-    if (m_eyesClosed) {
+    if (m_eyesClosed || m_mood == Mood::Happy) {
         painter.setPen(QPen(QColor(30, 60, 55), 2.5, Qt::SolidLine, Qt::RoundCap));
-        painter.drawLine(QPointF(eyeLX - 7 * s, eyeY), QPointF(eyeLX + 7 * s, eyeY));
-        painter.drawLine(QPointF(eyeRX - 7 * s, eyeY), QPointF(eyeRX + 7 * s, eyeY));
+        if (m_mood == Mood::Happy && !m_eyesClosed) {
+            // 开心弯眼
+            QPainterPath eyePathL;
+            eyePathL.moveTo(eyeLX - 7 * s, eyeY);
+            eyePathL.quadTo(eyeLX, eyeY - 5 * s, eyeLX + 7 * s, eyeY);
+            QPainterPath eyePathR;
+            eyePathR.moveTo(eyeRX - 7 * s, eyeY);
+            eyePathR.quadTo(eyeRX, eyeY - 5 * s, eyeRX + 7 * s, eyeY);
+            painter.drawPath(eyePathL);
+            painter.drawPath(eyePathR);
+        } else {
+            painter.drawLine(QPointF(eyeLX - 7 * s, eyeY), QPointF(eyeLX + 7 * s, eyeY));
+            painter.drawLine(QPointF(eyeRX - 7 * s, eyeY), QPointF(eyeRX + 7 * s, eyeY));
+        }
     } else {
         painter.setBrush(Qt::white);
         painter.setPen(QPen(QColor(30, 60, 55), 1.2));
         painter.drawEllipse(QPointF(eyeLX, eyeY), 9 * s, 10 * s);
         painter.drawEllipse(QPointF(eyeRX, eyeY), 9 * s, 10 * s);
 
-        const qreal pupilOffsetX = 2.0 * qSin(m_time * 0.8);
-        const qreal pupilOffsetY = 1.0 * qCos(m_time * 0.6);
+        const qreal pupilOffsetX = m_pupilX + 2.0 * qSin(m_time * 0.8);
+        const qreal pupilOffsetY = m_pupilY + 1.0 * qCos(m_time * 0.6);
         painter.setBrush(QColor(25, 45, 40));
         painter.setPen(Qt::NoPen);
         painter.drawEllipse(QPointF(eyeLX + pupilOffsetX, eyeY + pupilOffsetY), 4.5 * s, 5 * s);
@@ -255,13 +630,20 @@ void DragonWidget::drawDragon(QPainter &painter)
         painter.drawEllipse(QPointF(eyeRX + pupilOffsetX - 2 * s, eyeY + pupilOffsetY - 2 * s), 2 * s, 2 * s);
     }
 
-    // 前爪
+    if (m_blushAlpha > 0.01) {
+        painter.setOpacity(m_blushAlpha * 0.6);
+        painter.setBrush(QColor(255, 140, 160));
+        painter.setPen(Qt::NoPen);
+        painter.drawEllipse(QPointF(-22 * s, -36 * s), 8 * s, 5 * s);
+        painter.drawEllipse(QPointF(22 * s, -36 * s), 8 * s, 5 * s);
+        painter.setOpacity(1.0);
+    }
+
     painter.setBrush(QColor(56, 168, 148));
     painter.setPen(QPen(QColor(30, 95, 85), 1.2));
     painter.drawEllipse(QRectF(-28 * s, 10 * s, 12 * s, 10 * s));
     painter.drawEllipse(QRectF(16 * s, 10 * s, 12 * s, 10 * s));
 
-    // 背脊
     painter.setBrush(QColor(255, 183, 77));
     painter.setPen(Qt::NoPen);
     for (int i = 0; i < 4; ++i) {
@@ -313,19 +695,43 @@ void DragonWidget::drawFire(QPainter &painter, qreal intensity)
     painter.restore();
 }
 
+void DragonWidget::enterEvent(QEvent *event)
+{
+    Q_UNUSED(event)
+    m_mouseOver = true;
+    wakeUp();
+    m_idleSeconds = 0.0;
+}
+
+void DragonWidget::leaveEvent(QEvent *event)
+{
+    Q_UNUSED(event)
+    m_mouseOver = false;
+}
+
 void DragonWidget::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
-        m_dragging = true;
+        m_dragging = false;
+        m_pressPos = event->pos();
         m_dragOffset = event->globalPos() - frameGeometry().topLeft();
+        wakeUp();
         event->accept();
     }
 }
 
 void DragonWidget::mouseMoveEvent(QMouseEvent *event)
 {
-    if (m_dragging && (event->buttons() & Qt::LeftButton)) {
-        move(event->globalPos() - m_dragOffset);
+    m_localMouse = toDragonLocal(event->pos());
+
+    if (event->buttons() & Qt::LeftButton) {
+        const int dist = (event->pos() - m_pressPos).manhattanLength();
+        if (dist > 6) {
+            m_dragging = true;
+        }
+        if (m_dragging) {
+            move(event->globalPos() - m_dragOffset);
+        }
         event->accept();
     }
 }
@@ -333,6 +739,13 @@ void DragonWidget::mouseMoveEvent(QMouseEvent *event)
 void DragonWidget::mouseReleaseEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
+        const int dist = (event->pos() - m_pressPos).manhattanLength();
+        if (!m_dragging && dist <= 6) {
+            const HitRegion region = hitTest(toDragonLocal(event->pos()));
+            if (region != HitRegion::None) {
+                triggerInteraction(region);
+            }
+        }
         m_dragging = false;
         event->accept();
     }
@@ -341,9 +754,11 @@ void DragonWidget::mouseReleaseEvent(QMouseEvent *event)
 void DragonWidget::mouseDoubleClickEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
+        wakeUp();
         m_breathingFire = true;
         m_fireIntensity = 0.0;
         m_fireStartTime = m_time;
+        showBubble(QStringLiteral("呼——！"));
         event->accept();
     }
 }
@@ -351,9 +766,25 @@ void DragonWidget::mouseDoubleClickEvent(QMouseEvent *event)
 void DragonWidget::contextMenuEvent(QContextMenuEvent *event)
 {
     QMenu menu(this);
+
+    QAction *feedAction = menu.addAction(QStringLiteral("喂食"));
+    QAction *talkAction = menu.addAction(QStringLiteral("说句话"));
+    QAction *followAction = menu.addAction(QStringLiteral("跟随鼠标"));
+    followAction->setCheckable(true);
+    followAction->setChecked(m_followMouse);
+    menu.addSeparator();
     QAction *quitAction = menu.addAction(QStringLiteral("退出"));
+
     QAction *chosen = menu.exec(event->globalPos());
-    if (chosen == quitAction) {
+    if (chosen == feedAction) {
+        feedDragon();
+    } else if (chosen == talkAction) {
+        sayRandomLine();
+    } else if (chosen == followAction) {
+        m_followMouse = followAction->isChecked();
+        showBubble(m_followMouse ? QStringLiteral("我会跟着你~")
+                                 : QStringLiteral("我就在这里等你"));
+    } else if (chosen == quitAction) {
         qApp->quit();
     }
 }

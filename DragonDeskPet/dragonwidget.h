@@ -57,8 +57,16 @@ private:
         bool eaten = false;
     };
 
+    struct CloudPuff {
+        QPointF pos;
+        qreal size = 12.0;
+        qreal alpha = 0.5;
+        qreal drift = 0.0;
+    };
+
     QPointF toDragonLocal(const QPoint &widgetPos) const;
     HitRegion hitTest(const QPointF &local) const;
+    QPainterPath buildSpinePath() const;
     void triggerInteraction(HitRegion region);
     void showBubble(const QString &text, int durationMs = 2500);
     void setMood(Mood mood);
@@ -68,9 +76,12 @@ private:
     void spawnHearts(int count);
     void updateHearts(qreal dt);
     void updateFood(qreal dt);
+    void updateClouds(qreal dt);
     void updateFollowMouse(qreal dt);
     void updateMood(qreal dt);
+    void drawClouds(QPainter &painter);
     void drawDragon(QPainter &painter);
+    void drawDragonHead(QPainter &painter, const QPointF &headPos, qreal headAngle);
     void drawFire(QPainter &painter, qreal intensity);
     void drawBubble(QPainter &painter);
     void drawHearts(QPainter &painter);
@@ -93,8 +104,8 @@ private:
 
     Mood m_mood = Mood::Normal;
     qreal m_time = 0.0;
-    qreal m_tailAngle = 0.0;
-    qreal m_wingAngle = 0.0;
+    qreal m_bodyWave = 0.0;
+    qreal m_tailWave = 0.0;
     qreal m_breathScale = 1.0;
     qreal m_fireIntensity = 0.0;
     qreal m_fireStartTime = -1.0;
@@ -107,11 +118,12 @@ private:
     qreal m_idleSeconds = 0.0;
     qreal m_pupilX = 0.0;
     qreal m_pupilY = 0.0;
-    qreal m_blushAlpha = 0.0;
+    qreal m_glowAlpha = 0.0;
 
     QString m_bubbleText;
     QVector<Heart> m_hearts;
     QVector<Food> m_foods;
+    QVector<CloudPuff> m_clouds;
 };
 
 #endif // DRAGONWIDGET_H

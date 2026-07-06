@@ -18,3 +18,9 @@ msvc {
     QMAKE_CFLAGS += /utf-8
     QMAKE_CXXFLAGS += /utf-8
 }
+
+win32:CONFIG(release, debug|release) {
+    DEPLOYQT = $$[QT_INSTALL_BINS]/windeployqt.exe
+    DEPLOY_TARGET = $$shell_path($$OUT_PWD/release/$${TARGET}.exe)
+    QMAKE_POST_LINK += $$quote($$DEPLOYQT) --no-translations $$quote($$DEPLOY_TARGET)
+}

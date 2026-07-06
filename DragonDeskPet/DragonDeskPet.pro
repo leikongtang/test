@@ -7,10 +7,12 @@ TARGET = DragonDeskPet
 
 SOURCES += \
     main.cpp \
-    dragonwidget.cpp
+    dragonwidget.cpp \
+    eastdragonpainter.cpp
 
 HEADERS += \
-    dragonwidget.h
+    dragonwidget.h \
+    eastdragonpainter.h
 
 RESOURCES += resources.qrc
 

@@ -1,7 +1,8 @@
 #ifndef DRAGONWIDGET_H
 #define DRAGONWIDGET_H
 
-#include <QPixmap>
+#include "eastdragonpainter.h"
+
 #include <QPoint>
 #include <QPointF>
 #include <QRectF>
@@ -32,18 +33,14 @@ private slots:
     void onIdleCheck();
 
 private:
-    enum class HitRegion {
-        None,
-        Head,
-        Body,
-        Tail
-    };
+    using HitRegion = EastDragonPainter::Part;
 
     enum class Mood {
         Normal,
         Majestic,
         Sleeping,
-        Eating
+        Eating,
+        Waiting
     };
 
     struct AuraRing {
@@ -74,11 +71,11 @@ private:
         qreal alpha = 0.6;
     };
 
-    bool loadDragonSprite();
     QRectF dragonDrawRect() const;
     QPointF dragonCenter() const;
     QPointF toDragonLocal(const QPoint &widgetPos) const;
     HitRegion hitTest(const QPointF &local) const;
+    void updateDragonPose(qreal dt);
     void triggerInteraction(HitRegion region);
     void showBubble(const QString &text, int durationMs = 2500);
     void setMood(Mood mood);
@@ -96,17 +93,18 @@ private:
     void updateMood(qreal dt);
     void drawBackgroundMist(QPainter &painter);
     void drawMistParticles(QPainter &painter);
-    void drawDragonSprite(QPainter &painter);
+    void drawDragon(QPainter &painter);
     void drawFire(QPainter &painter, qreal intensity);
     void drawAuraRings(QPainter &painter);
     void drawBubble(QPainter &painter);
     void drawFood(QPainter &painter);
     void drawSleepEffect(QPainter &painter);
+    void drawWaitingHint(QPainter &painter);
 
     QTimer m_animTimer;
     QTimer m_idleTimer;
 
-    QPixmap m_dragonPixmap;
+    EastDragonPainter::Pose m_dragonPose;
     QRectF m_spriteRect;
 
     QPoint m_dragOffset;
@@ -118,7 +116,8 @@ private:
     bool m_followMouse = false;
     bool m_breathingFire = false;
 
-    Mood m_mood = Mood::Normal;
+    Mood m_mood = Mood::Waiting;
+    HitRegion m_reactPart = HitRegion::None;
     qreal m_time = 0.0;
     qreal m_breathScale = 1.0;
     qreal m_swayAngle = 0.0;
@@ -133,6 +132,10 @@ private:
     qreal m_auraAlpha = 0.0;
     qreal m_mistEmitTimer = 0.0;
     qreal m_sleepAlpha = 1.0;
+    qreal m_nextBlinkAt = 2.5;
+    qreal m_blinkUntil = -1.0;
+    qreal m_reactTimer = 0.0;
+    qreal m_waitHintAlpha = 0.0;
 
     QString m_bubbleText;
     QVector<AuraRing> m_auras;

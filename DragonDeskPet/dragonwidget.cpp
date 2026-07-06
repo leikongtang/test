@@ -7,7 +7,6 @@
 #include <QEvent>
 #include <QFont>
 #include <QFontMetrics>
-#include <QImage>
 #include <QLineF>
 #include <QLinearGradient>
 #include <QMenu>
@@ -43,162 +42,6 @@ void drawCloudBlob(QPainter &p, const QPointF &c, qreal w, qreal h, qreal alpha)
     p.drawEllipse(c + QPointF(-w * 0.35, h * 0.12), w * 0.5, h * 0.45);
 }
 
-QImage extractDragonFromBackground(const QImage &source)
-{
-    QImage img = source.convertToFormat(QImage::Format_ARGB32);
-    const int w = img.width();
-    const int h = img.height();
-
-    auto colorDist = [](const QColor &a, const QColor &b) {
-        return qAbs(a.red() - b.red()) + qAbs(a.green() - b.green()) + qAbs(a.blue() - b.blue());
-    };
-
-    auto isDragonPixel = [](const QColor &c) {
-        if (c.alpha() < 10) {
-            return false;
-        }
-        const int maxC = qMax(c.red(), qMax(c.green(), c.blue()));
-        const int minC = qMin(c.red(), qMin(c.green(), c.blue()));
-        const int sat = maxC - minC;
-        const int greenDominance = c.green() - qMax(c.red(), c.blue());
-        // 龙身：绿色主导或高饱和暖色（须、角）
-        if (greenDominance > 8 && c.green() > 60) {
-            return true;
-        }
-        if (sat > 35 && c.green() >= c.red() - 20) {
-            return true;
-        }
-        // 保留白色龙腹、牙齿
-        if (maxC > 180 && sat < 40 && c.green() >= c.red() - 15) {
-            return true;
-        }
-        return false;
-    };
-
-    auto isBackgroundPixel = [&](const QColor &c) {
-        if (isDragonPixel(c)) {
-            return false;
-        }
-        const int maxC = qMax(c.red(), qMax(c.green(), c.blue()));
-        const int minC = qMin(c.red(), qMin(c.green(), c.blue()));
-        const int sat = maxC - minC;
-        const int brightness = (c.red() + c.green() + c.blue()) / 3;
-        // 天空、云雾、雪山：亮且低饱和，或偏蓝灰
-        if (brightness > 165 && sat < 55) {
-            return true;
-        }
-        if (c.blue() >= c.red() && c.blue() >= c.green() - 10 && brightness > 120 && sat < 70) {
-            return true;
-        }
-        if (brightness > 130 && sat < 30) {
-            return true;
-        }
-        return false;
-    };
-
-    QVector<int> labels(w * h, 0);
-    int nextLabel = 1;
-    struct Seed { int x; int y; QColor color; };
-    QVector<Seed> seeds;
-
-    auto pushSeed = [&](int x, int y) {
-        if (x < 0 || y < 0 || x >= w || y >= h) {
-            return;
-        }
-        const QColor c = img.pixelColor(x, y);
-        if (isBackgroundPixel(c)) {
-            seeds.append({x, y, c});
-        }
-    };
-
-    for (int x = 0; x < w; ++x) {
-        pushSeed(x, 0);
-        pushSeed(x, h - 1);
-    }
-    for (int y = 0; y < h; ++y) {
-        pushSeed(0, y);
-        pushSeed(w - 1, y);
-    }
-
-    const int tolerance = 48;
-    for (const Seed &seed : seeds) {
-        const int sx = seed.x;
-        const int sy = seed.y;
-        const int idx = sy * w + sx;
-        if (labels[idx] != 0) {
-            continue;
-        }
-        const int label = nextLabel++;
-        QVector<QPoint> stack;
-        stack.append(QPoint(sx, sy));
-        labels[idx] = label;
-
-        while (!stack.isEmpty()) {
-            const QPoint p = stack.takeLast();
-            const QColor pc = img.pixelColor(p.x(), p.y());
-            const int neighbors[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-            for (auto &n : neighbors) {
-                const int nx = p.x() + n[0];
-                const int ny = p.y() + n[1];
-                if (nx < 0 || ny < 0 || nx >= w || ny >= h) {
-                    continue;
-                }
-                const int nidx = ny * w + nx;
-                if (labels[nidx] != 0) {
-                    continue;
-                }
-                const QColor nc = img.pixelColor(nx, ny);
-                if (isDragonPixel(nc)) {
-                    continue;
-                }
-                if (colorDist(pc, nc) <= tolerance || isBackgroundPixel(nc)) {
-                    labels[nidx] = label;
-                    stack.append(QPoint(nx, ny));
-                }
-            }
-        }
-    }
-
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            QColor c = img.pixelColor(x, y);
-            if (isBackgroundPixel(c) || labels[y * w + x] != 0) {
-                c.setAlpha(0);
-            } else if (isDragonPixel(c)) {
-                c.setAlpha(255);
-            } else {
-                // 边缘过渡像素：按与最近背景色的距离软抠
-                const int alpha = qBound(40, 255 - colorDist(c, QColor(220, 230, 240)), 255);
-                c.setAlpha(alpha);
-            }
-            img.setPixelColor(x, y, c);
-        }
-    }
-
-    // 裁切透明边距
-    int minX = w, minY = h, maxX = 0, maxY = 0;
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            if (img.pixelColor(x, y).alpha() > 20) {
-                minX = qMin(minX, x);
-                minY = qMin(minY, y);
-                maxX = qMax(maxX, x);
-                maxY = qMax(maxY, y);
-            }
-        }
-    }
-    if (maxX > minX && maxY > minY) {
-        const int pad = 8;
-        minX = qMax(0, minX - pad);
-        minY = qMax(0, minY - pad);
-        maxX = qMin(w - 1, maxX + pad);
-        maxY = qMin(h - 1, maxY + pad);
-        img = img.copy(minX, minY, maxX - minX + 1, maxY - minY + 1);
-    }
-
-    return img;
-}
-
 } // namespace
 
 DragonWidget::DragonWidget(QWidget *parent)
@@ -209,7 +52,7 @@ DragonWidget::DragonWidget(QWidget *parent)
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
 
-    loadDragonSprite();
+    m_spriteRect = EastDragonPainter::bounds();
 
     for (int i = 0; i < 16; ++i) {
         CloudPuff cloud;
@@ -228,34 +71,8 @@ DragonWidget::DragonWidget(QWidget *parent)
 
     m_lastGlobalPos = pos();
     m_auraAlpha = 0.3;
-    showBubble(QStringLiteral("神龙降世，云雾随行。"), 3000);
-}
-
-bool DragonWidget::loadDragonSprite()
-{
-    QImage raw(QStringLiteral(":/resources/dragon_cutout.png"));
-    if (raw.isNull()) {
-        QImage original(QStringLiteral(":/resources/dragon_2d.png"));
-        if (original.isNull()) {
-            return false;
-        }
-        raw = extractDragonFromBackground(original);
-    }
-
-    m_dragonPixmap = QPixmap::fromImage(raw);
-
-    const qreal targetW = 280.0;
-    const qreal scale = targetW / m_dragonPixmap.width();
-    const qreal targetH = m_dragonPixmap.height() * scale;
-    m_dragonPixmap = m_dragonPixmap.scaled(int(targetW), int(targetH),
-                                           Qt::KeepAspectRatio,
-                                           Qt::SmoothTransformation);
-
-    m_spriteRect = QRectF(-m_dragonPixmap.width() / 2.0,
-                          -m_dragonPixmap.height() / 2.0 + 10.0,
-                          m_dragonPixmap.width(),
-                          m_dragonPixmap.height());
-    return true;
+    m_waitHintAlpha = 0.6;
+    showBubble(QStringLiteral("神龙降世，静候天时。"), 3000);
 }
 
 QRectF DragonWidget::dragonDrawRect() const
@@ -278,24 +95,58 @@ QPointF DragonWidget::toDragonLocal(const QPoint &widgetPos) const
 
 DragonWidget::HitRegion DragonWidget::hitTest(const QPointF &local) const
 {
-    const QRectF r = dragonDrawRect();
-    if (!r.contains(local)) {
-        return HitRegion::None;
+    return EastDragonPainter::hitTest(local);
+}
+
+void DragonWidget::updateDragonPose(qreal dt)
+{
+    const bool waiting = (m_mood == Mood::Waiting || m_mood == Mood::Normal);
+    const bool sleeping = (m_mood == Mood::Sleeping);
+
+    if (sleeping) {
+        m_dragonPose.waitBob = qSin(m_time * 0.45) * 1.5;
+        m_dragonPose.bodyWave = qSin(m_time * 0.5) * 0.3;
+        m_dragonPose.tailSway = qSin(m_time * 0.4) * 5;
+        m_dragonPose.whiskerSway = qSin(m_time * 0.6) * 0.2;
+        m_dragonPose.clawLift = 0;
+        m_dragonPose.headTilt = qSin(m_time * 0.35) * 1.5;
+    } else if (waiting) {
+        m_dragonPose.waitBob = qSin(m_time * 0.75) * 4.0;
+        m_dragonPose.bodyWave = qSin(m_time * 1.1) * 1.0;
+        m_dragonPose.tailSway = qSin(m_time * 0.85) * 14.0;
+        m_dragonPose.whiskerSway = qSin(m_time * 1.6) * 0.8;
+        m_dragonPose.clawLift = qMax(0.0, qSin(m_time * 0.5) * 4.0);
+        m_dragonPose.headTilt = qSin(m_time * 0.6) * 3.0;
+        m_waitHintAlpha = 0.35 + 0.25 * (1.0 + qSin(m_time * 1.2)) * 0.5;
+    } else {
+        m_dragonPose.waitBob = qSin(m_time * 0.9) * 2.5;
+        m_dragonPose.bodyWave = qSin(m_time * 1.3) * 0.6;
+        m_dragonPose.tailSway = qSin(m_time * 1.0) * 10.0;
+        m_dragonPose.whiskerSway = qSin(m_time * 2.0) * 0.5;
+        m_dragonPose.clawLift = qMax(0.0, qSin(m_time * 0.8) * 2.0);
+        m_dragonPose.headTilt = qSin(m_time * 0.7) * 2.0;
+        m_waitHintAlpha = 0.0;
     }
 
-    const qreal nx = (local.x() - r.left()) / r.width();
-    const qreal ny = (local.y() - r.top()) / r.height();
+    if (m_blinkUntil >= 0 && m_time >= m_blinkUntil) {
+        m_dragonPose.eyesOpen = true;
+        m_blinkUntil = -1.0;
+        m_nextBlinkAt = m_time + 2.0 + (qrand() % 25) / 10.0;
+    } else if (m_blinkUntil < 0 && m_time >= m_nextBlinkAt) {
+        m_dragonPose.eyesOpen = false;
+        m_blinkUntil = m_time + 0.14;
+    }
 
-    if (nx < 0.42 && ny < 0.42) {
-        return HitRegion::Head;
+    if (m_reactTimer > 0.0) {
+        m_reactTimer -= dt;
+        m_dragonPose.reactPart = m_reactPart;
+        m_dragonPose.reactAmount = qBound(0.0, m_reactTimer / 1.2, 1.0);
+    } else {
+        m_dragonPose.reactPart = HitRegion::None;
+        m_dragonPose.reactAmount = 0.0;
     }
-    if (nx > 0.52 && ny > 0.68) {
-        return HitRegion::Tail;
-    }
-    if (nx > 0.08 && nx < 0.92 && ny > 0.12 && ny < 0.92) {
-        return HitRegion::Body;
-    }
-    return HitRegion::None;
+
+    m_dragonPose.hoverPart = m_mouseOver ? hitTest(m_localMouse) : HitRegion::None;
 }
 
 void DragonWidget::setMood(Mood mood)
@@ -304,7 +155,7 @@ void DragonWidget::setMood(Mood mood)
     if (mood == Mood::Majestic) {
         m_majesticTimer = 2.8;
         m_auraAlpha = 1.0;
-    } else if (mood == Mood::Normal) {
+    } else if (mood == Mood::Normal || mood == Mood::Waiting) {
         m_auraAlpha = 0.3;
         m_sleepAlpha = 1.0;
     } else if (mood == Mood::Sleeping) {
@@ -378,24 +229,57 @@ void DragonWidget::triggerInteraction(HitRegion region)
 {
     wakeUp();
     m_idleSeconds = 0.0;
-    const QRectF r = dragonDrawRect();
+    m_reactPart = region;
+    m_reactTimer = 1.2;
+
+    if (m_mood == Mood::Waiting) {
+        setMood(Mood::Normal);
+    }
+
+    const QPointF anchor = EastDragonPainter::partAnchor(region);
 
     switch (region) {
     case HitRegion::Head:
         setMood(Mood::Majestic);
-        spawnAuraPulse(QPointF(r.left() + r.width() * 0.18, r.top() + r.height() * 0.22));
+        spawnAuraPulse(anchor);
         emitBodyMist(10);
         showBubble(QStringLiteral("触龙首者，当思其威。"));
         break;
+    case HitRegion::WhiskerLeft:
+        setMood(Mood::Majestic);
+        spawnAuraPulse(anchor);
+        emitBodyMist(4);
+        showBubble(QStringLiteral("左须轻颤，察天地气机。"));
+        break;
+    case HitRegion::WhiskerRight:
+        setMood(Mood::Majestic);
+        spawnAuraPulse(anchor);
+        emitBodyMist(4);
+        showBubble(QStringLiteral("右须微扬，感风云变幻。"));
+        break;
+    case HitRegion::ClawFront:
+        setMood(Mood::Majestic);
+        m_dragonPose.clawLift = 12.0;
+        spawnAuraPulse(anchor);
+        emitBodyMist(6);
+        showBubble(QStringLiteral("探爪微舒，示爪牙之威。"));
+        break;
+    case HitRegion::ClawRear:
+        setMood(Mood::Majestic);
+        spawnAuraPulse(anchor);
+        emitBodyMist(6);
+        showBubble(QStringLiteral("后爪轻踏，山河为之震动。"));
+        break;
     case HitRegion::Body:
         setMood(Mood::Majestic);
-        spawnAuraPulse(r.center());
+        spawnAuraPulse(anchor);
         emitBodyMist(8);
         showBubble(QStringLiteral("龙躯不动，风云自生。"));
         break;
     case HitRegion::Tail:
         setMood(Mood::Majestic);
-        spawnAuraPulse(QPointF(r.left() + r.width() * 0.72, r.top() + r.height() * 0.82));
+        m_dragonPose.tailSway += 18.0;
+        spawnAuraPulse(anchor);
         emitBodyMist(10);
         showBubble(QStringLiteral("撼龙尾者，天地为之色变！"));
         break;
@@ -412,8 +296,8 @@ void DragonWidget::feedDragon()
     m_eatTimer = 2.0;
     m_foods.clear();
     Food food;
-    const QRectF r = dragonDrawRect();
-    food.pos = QPointF(r.left() + r.width() * 0.15, r.top() + r.height() * 0.05);
+    const QPointF head = EastDragonPainter::partAnchor(HitRegion::Head);
+    food.pos = head + QPointF(20, -30);
     food.vy = 0.0;
     m_foods.append(food);
     showBubble(QStringLiteral("吞珠纳云，威势更盛。"), 2200);
@@ -440,14 +324,14 @@ void DragonWidget::updateAura(qreal dt)
 
 void DragonWidget::updateFood(qreal dt)
 {
+    const QPointF mouth = EastDragonPainter::mouthPosition(m_dragonPose);
     for (Food &food : m_foods) {
         if (food.eaten) {
             continue;
         }
         food.vy += 130.0 * dt;
         food.pos.setY(food.pos.y() + food.vy * dt);
-        const QRectF r = dragonDrawRect();
-        if (food.pos.y() >= r.top() + r.height() * 0.18) {
+        if (food.pos.y() >= mouth.y()) {
             food.eaten = true;
             emitBodyMist(8);
         }
@@ -506,7 +390,7 @@ void DragonWidget::updateMood(qreal dt)
     if (m_majesticTimer > 0.0) {
         m_majesticTimer -= dt;
         if (m_majesticTimer <= 0.0 && m_mood == Mood::Majestic) {
-            setMood(Mood::Normal);
+            setMood(Mood::Waiting);
         }
     }
 
@@ -539,10 +423,12 @@ void DragonWidget::onAnimTick()
         m_bounceY = 1.0 * qSin(m_time * 0.45);
         m_swayAngle = 0.4 * qSin(m_time * 0.6);
     } else {
-        m_breathScale = 1.0 + 0.01 * qSin(m_time * 1.1);
-        m_bounceY = (m_mood == Mood::Majestic ? 3.5 : 2.0) * qSin(m_time * 0.85);
-        m_swayAngle = 0.8 * qSin(m_time * 0.9);
+        m_breathScale = 1.0 + 0.012 * qSin(m_time * 1.1);
+        m_bounceY = (m_mood == Mood::Majestic ? 3.5 : 2.5) * qSin(m_time * 0.85);
+        m_swayAngle = 0.6 * qSin(m_time * 0.9);
     }
+
+    updateDragonPose(dt);
 
     if (m_breathingFire) {
         m_fireIntensity = qMin(1.0, m_fireIntensity + 0.06);
@@ -584,6 +470,9 @@ void DragonWidget::onIdleCheck()
         return;
     }
     m_idleSeconds += 1.0;
+    if (m_idleSeconds >= 8.0 && m_mood != Mood::Sleeping && m_mood != Mood::Waiting) {
+        setMood(Mood::Waiting);
+    }
     if (m_idleSeconds >= 50.0 && m_mood != Mood::Sleeping) {
         setMood(Mood::Sleeping);
         showBubble(QStringLiteral("龙隐云深，静候天时。"), 2200);
@@ -606,12 +495,16 @@ void DragonWidget::paintEvent(QPaintEvent *event)
 
     drawBackgroundMist(painter);
     drawAuraRings(painter);
-    drawDragonSprite(painter);
+    drawDragon(painter);
     drawMistParticles(painter);
     drawFood(painter);
 
     if (m_mood == Mood::Sleeping) {
         drawSleepEffect(painter);
+    }
+
+    if (m_mood == Mood::Waiting && m_waitHintAlpha > 0.01) {
+        drawWaitingHint(painter);
     }
 
     if (m_fireIntensity > 0.01) {
@@ -646,26 +539,30 @@ void DragonWidget::drawMistParticles(QPainter &painter)
     painter.restore();
 }
 
-void DragonWidget::drawDragonSprite(QPainter &painter)
+void DragonWidget::drawDragon(QPainter &painter)
 {
-    if (m_dragonPixmap.isNull()) {
-        return;
-    }
+    EastDragonPainter::draw(painter, m_dragonPose, m_auraAlpha, m_sleepAlpha);
+}
 
+void DragonWidget::drawWaitingHint(QPainter &painter)
+{
     painter.save();
-    painter.setOpacity(m_sleepAlpha);
+    painter.setOpacity(m_waitHintAlpha);
 
-    if (m_auraAlpha > 0.01) {
-        QRadialGradient glow(dragonCenter(), m_spriteRect.width() * 0.55);
-        glow.setColorAt(0.0, QColor(100, 200, 160, int(70 * m_auraAlpha)));
-        glow.setColorAt(0.7, QColor(60, 140, 110, int(25 * m_auraAlpha)));
-        glow.setColorAt(1.0, QColor(40, 100, 80, 0));
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(glow);
-        painter.drawEllipse(dragonCenter(), m_spriteRect.width() * 0.5, m_spriteRect.height() * 0.45);
+    const QPointF c = EastDragonPainter::partAnchor(HitRegion::Head) + QPointF(0, -52);
+    QPen pen(QColor(180, 220, 160, 140), 1.5, Qt::DashLine);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawEllipse(c, 14, 14);
+
+    for (int i = 0; i < 3; ++i) {
+        const qreal phase = m_time * 2.0 + i * 0.6;
+        const qreal r = 14 + (phase - int(phase)) * 10;
+        const int alpha = int(120 * (1.0 - (phase - int(phase))));
+        pen.setColor(QColor(180, 220, 160, alpha));
+        painter.setPen(pen);
+        painter.drawEllipse(c, r, r);
     }
-
-    painter.drawPixmap(m_spriteRect.topLeft(), m_dragonPixmap);
     painter.restore();
 }
 
@@ -749,8 +646,7 @@ void DragonWidget::drawSleepEffect(QPainter &painter)
 
 void DragonWidget::drawFire(QPainter &painter, qreal intensity)
 {
-    const QRectF r = dragonDrawRect();
-    const QPointF mouth(r.left() + r.width() * 0.10, r.top() + r.height() * 0.30);
+    const QPointF mouth = EastDragonPainter::mouthPosition(m_dragonPose);
 
     painter.save();
     painter.translate(mouth);
@@ -796,12 +692,16 @@ void DragonWidget::enterEvent(QEvent *event)
     m_mouseOver = true;
     wakeUp();
     m_idleSeconds = 0.0;
+    if (m_mood == Mood::Waiting) {
+        setMood(Mood::Normal);
+    }
 }
 
 void DragonWidget::leaveEvent(QEvent *event)
 {
     Q_UNUSED(event)
     m_mouseOver = false;
+    m_dragonPose.hoverPart = HitRegion::None;
 }
 
 void DragonWidget::mousePressEvent(QMouseEvent *event)
@@ -829,6 +729,8 @@ void DragonWidget::mouseMoveEvent(QMouseEvent *event)
             move(event->globalPos() - m_dragOffset);
         }
         event->accept();
+    } else {
+        update();
     }
 }
 
@@ -851,6 +753,7 @@ void DragonWidget::mouseDoubleClickEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
         wakeUp();
+        setMood(Mood::Majestic);
         m_breathingFire = true;
         m_fireIntensity = 0.0;
         m_fireStartTime = m_time;

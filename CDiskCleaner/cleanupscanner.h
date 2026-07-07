@@ -9,7 +9,6 @@ class CleanupScanner
 {
 public:
     static QVector<CleanupCategory> defaultCategories();
-    static void refreshDynamicCategoryPaths(QVector<CleanupCategory> &categories);
     static qint64 calculateDirectorySize(const QString &path, bool *cancelled = nullptr);
     static qint64 scanCategorySize(const CleanupCategory &category, bool *cancelled = nullptr);
     static bool cleanCategory(const CleanupCategory &category, bool *cancelled = nullptr);

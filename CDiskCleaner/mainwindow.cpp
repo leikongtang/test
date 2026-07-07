@@ -737,11 +737,6 @@ void MainWindow::onSoftwareScanClicked()
         updateSoftwareCacheRow(i, m_categories.at(m_softwareCategoryIndices.at(i)));
     }
 
-    CleanupScanner::refreshDynamicCategoryPaths(m_categories);
-    for (int i = 0; i < m_softwareCategoryIndices.size(); ++i) {
-        updateSoftwareCacheRow(i, m_categories.at(m_softwareCategoryIndices.at(i)));
-    }
-
     const QVector<CleanupCategory> payload = collectSoftwareCategoriesForWorker();
     m_worker->setCategories(payload);
     m_worker->setMode(CleanupWorker::Mode::Scan);
@@ -888,7 +883,6 @@ void MainWindow::onRefreshAppsClicked()
 
     m_installedApps.clear();
     m_appModel->clearApps();
-    m_uninstallSearchEdit->clear();
     m_appsLoadStarted = true;
     m_appsLoadFinished = false;
 
@@ -1048,7 +1042,7 @@ void MainWindow::onAppScanFinished(const QVector<InstalledApp> &apps)
         m_uninstallStatusLabel->setText(QStringLiteral("未发现可卸载软件，请尝试以管理员身份运行后刷新。"));
     } else {
         m_uninstallStatusLabel->setText(
-            QStringLiteral("加载完成，共 %1 款软件（含商店应用），当前显示 %2 款。")
+            QStringLiteral("加载完成，共 %1 款软件，当前显示 %2 款。")
                 .arg(apps.size())
                 .arg(m_appModel->rowCount()));
     }

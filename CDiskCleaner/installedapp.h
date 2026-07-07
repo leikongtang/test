@@ -2,6 +2,9 @@
 #define INSTALLEDAPP_H
 
 #include <QString>
+#include <QVector>
+#include <QMetaType>
+#include <QtGlobal>
 
 struct InstalledApp
 {
@@ -9,6 +12,7 @@ struct InstalledApp
     QString displayVersion;
     QString publisher;
     QString installLocation;
+    QString displayIcon;
     QString uninstallString;
     QString quietUninstallString;
     QString registryPath;
@@ -30,5 +34,8 @@ struct InstalledApp
                && (!uninstallString.isEmpty() || !installLocation.isEmpty());
     }
 };
+
+Q_DECLARE_METATYPE(InstalledApp)
+Q_DECLARE_METATYPE(QVector<InstalledApp>)
 
 #endif // INSTALLEDAPP_H

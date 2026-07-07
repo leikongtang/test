@@ -44,7 +44,7 @@ private slots:
     void onUninstallClicked();
     void onForceUninstallClicked();
     void onAppScanBatchReady(const QVector<InstalledApp> &apps, int totalCount);
-    void onAppScanFinished(int totalCount);
+    void onAppScanFinished(const QVector<InstalledApp> &apps);
     void onAppUninstallFinished(bool success, const QString &message);
 
 private:

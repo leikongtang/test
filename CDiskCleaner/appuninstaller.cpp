@@ -96,6 +96,7 @@ InstalledApp readAppFromOpenKey(HKEY hKey, const QString &rootPath, const QStrin
     app.displayVersion = queryValueFromKey(hKey, L"DisplayVersion").trimmed();
     app.publisher = queryValueFromKey(hKey, L"Publisher").trimmed();
     app.installLocation = normalizePath(queryValueFromKey(hKey, L"InstallLocation"));
+    app.displayIcon = queryValueFromKey(hKey, L"DisplayIcon").trimmed();
 
     if (!listOnly) {
         app.uninstallString = queryValueFromKey(hKey, L"UninstallString").trimmed();

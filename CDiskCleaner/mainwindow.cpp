@@ -60,7 +60,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::setupUi()
 {
-    setWindowTitle(QStringLiteral("C盘清理工具 v1.2.3"));
+    setWindowTitle(QStringLiteral("C盘清理工具 v1.2.4"));
     resize(1020, 720);
 
     m_tabWidget = new QTabWidget(this);
@@ -187,12 +187,16 @@ void MainWindow::setupUninstallTab(QWidget *tab)
     m_appTableView->setAlternatingRowColors(true);
     m_appTableView->verticalHeader()->setVisible(false);
     m_appTableView->horizontalHeader()->setStretchLastSection(false);
-    m_appTableView->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_appTableView->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
     m_appTableView->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_appTableView->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    m_appTableView->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
-    m_appTableView->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    m_appTableView->setSortingEnabled(true);
+    m_appTableView->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_appTableView->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    m_appTableView->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    m_appTableView->setColumnWidth(0, 36);
+    m_appTableView->setIconSize(QSize(24, 24));
+    m_appTableView->verticalHeader()->setDefaultSectionSize(32);
+    m_appTableView->setSortingEnabled(false);
 
     QHBoxLayout *actionLayout = new QHBoxLayout();
     m_uninstallButton = new QPushButton(QStringLiteral("正常卸载"), tab);
@@ -243,9 +247,9 @@ void MainWindow::setupUninstallWorker()
     m_uninstallWorker->moveToThread(m_uninstallWorkerThread);
 
     connect(m_uninstallWorkerThread, &QThread::started, m_uninstallWorker, &AppUninstallWorker::process);
-    connect(m_uninstallWorker, &AppUninstallWorker::scanBatchReady, this, &MainWindow::onAppScanBatchReady);
-    connect(m_uninstallWorker, &AppUninstallWorker::scanFinished, this, &MainWindow::onAppScanFinished);
-    connect(m_uninstallWorker, &AppUninstallWorker::uninstallFinished, this, &MainWindow::onAppUninstallFinished);
+    connect(m_uninstallWorker, &AppUninstallWorker::scanBatchReady, this, &MainWindow::onAppScanBatchReady, Qt::QueuedConnection);
+    connect(m_uninstallWorker, &AppUninstallWorker::scanFinished, this, &MainWindow::onAppScanFinished, Qt::QueuedConnection);
+    connect(m_uninstallWorker, &AppUninstallWorker::uninstallFinished, this, &MainWindow::onAppUninstallFinished, Qt::QueuedConnection);
     connect(m_uninstallWorker, &AppUninstallWorker::scanFinished, m_uninstallWorkerThread, &QThread::quit);
     connect(m_uninstallWorker, &AppUninstallWorker::uninstallFinished, m_uninstallWorkerThread, &QThread::quit);
 }
@@ -674,24 +678,23 @@ void MainWindow::onAppScanBatchReady(const QVector<InstalledApp> &apps, int tota
         QStringLiteral("正在加载软件列表，已发现 %1 款...").arg(totalCount));
 }
 
-void MainWindow::onAppScanFinished(int totalCount)
+void MainWindow::onAppScanFinished(const QVector<InstalledApp> &apps)
 {
     setUninstallLoading(false);
     m_appsLoadFinished = true;
-
-    if (m_installedApps.isEmpty() && totalCount > 0) {
-        rebuildFilteredApps();
-    } else if (m_appModel->rowCount() == 0 && !m_installedApps.isEmpty()) {
-        rebuildFilteredApps();
-    }
-
+    m_installedApps = apps;
+    rebuildFilteredApps();
     m_appTableView->setSortingEnabled(true);
+    m_appTableView->resizeColumnsToContents();
+    m_appTableView->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
 
-    if (totalCount == 0) {
+    if (apps.isEmpty()) {
         m_uninstallStatusLabel->setText(QStringLiteral("未发现可卸载软件，请尝试以管理员身份运行后刷新。"));
     } else {
         m_uninstallStatusLabel->setText(
-            QStringLiteral("加载完成，共 %1 款软件。").arg(totalCount));
+            QStringLiteral("加载完成，共 %1 款软件，当前显示 %2 款。")
+                .arg(apps.size())
+                .arg(m_appModel->rowCount()));
     }
 }
 

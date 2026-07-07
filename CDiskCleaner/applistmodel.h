@@ -4,6 +4,8 @@
 #include "installedapp.h"
 
 #include <QAbstractTableModel>
+#include <QHash>
+#include <QIcon>
 #include <QVector>
 
 class AppListModel : public QAbstractTableModel
@@ -24,7 +26,10 @@ public:
     InstalledApp appAt(int row) const;
 
 private:
+    QIcon iconForApp(const InstalledApp &app) const;
+
     QVector<InstalledApp> m_apps;
+    mutable QHash<QString, QIcon> m_iconCache;
 };
 
 #endif // APPLISTMODEL_H

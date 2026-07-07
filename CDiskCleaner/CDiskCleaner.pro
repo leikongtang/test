@@ -9,16 +9,21 @@ SOURCES += \
     main.cpp \
     mainwindow.cpp \
     cleanupscanner.cpp \
-    cleanupworker.cpp
+    cleanupworker.cpp \
+    appuninstaller.cpp \
+    appuninstallworker.cpp
 
 HEADERS += \
     mainwindow.h \
     cleanupcategory.h \
     cleanupscanner.h \
-    cleanupworker.h
+    cleanupworker.h \
+    installedapp.h \
+    appuninstaller.h \
+    appuninstallworker.h
 
 win32 {
-    LIBS += -lshell32
+    LIBS += -lshell32 -ladvapi32
 }
 
 msvc {

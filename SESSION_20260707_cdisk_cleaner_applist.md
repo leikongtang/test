@@ -14,6 +14,7 @@
 |------|----------|
 | v1.2.4 | 注册 `InstalledApp` / `QVector<InstalledApp>` 元类型，修复跨线程信号 |
 | v1.2.5 | 显式 `Qt::QueuedConnection`；新增图标列；读取 DisplayIcon |
+| v1.2.6 | 安装路径列加大字号；蓝色链接样式；点击打开资源管理器 |
 
 ## 涉及文件
 
@@ -25,5 +26,5 @@
 
 ## 未完成事项
 
+- [x] 编译通过并 push
 - [ ] 用户验证图标与列表显示
-- [ ] git push

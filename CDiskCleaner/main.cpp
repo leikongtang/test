@@ -8,7 +8,7 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("CDiskCleaner"));
-    app.setApplicationVersion(QStringLiteral("1.2.5"));
+    app.setApplicationVersion(QStringLiteral("1.2.6"));
 
     qRegisterMetaType<InstalledApp>("InstalledApp");
     qRegisterMetaType<QVector<InstalledApp>>("QVector<InstalledApp>");

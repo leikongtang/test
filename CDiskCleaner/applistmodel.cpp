@@ -3,6 +3,8 @@
 
 #include <QFileIconProvider>
 #include <QFileInfo>
+#include <QColor>
+#include <QFont>
 
 namespace {
 
@@ -91,6 +93,27 @@ QVariant AppListModel::data(const QModelIndex &index, int role) const
 
     if (index.column() == 0 && role == Qt::DecorationRole) {
         return iconForApp(app);
+    }
+
+    if (index.column() == 4) {
+        if (role == Qt::FontRole) {
+            QFont font;
+            font.setPointSize(11);
+            return font;
+        }
+        if (role == Qt::ForegroundRole) {
+            if (app.installLocation.isEmpty()) {
+                return QVariant();
+            }
+            const bool exists = QFileInfo(app.installLocation).exists();
+            return exists ? QColor(0, 102, 204) : QColor(128, 128, 128);
+        }
+        if (role == Qt::ToolTipRole) {
+            if (app.installLocation.isEmpty()) {
+                return QString();
+            }
+            return QStringLiteral("点击在资源管理器中打开\n%1").arg(app.installLocation);
+        }
     }
 
     if (role != Qt::DisplayRole) {

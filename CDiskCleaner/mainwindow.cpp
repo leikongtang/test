@@ -7,6 +7,9 @@
 #include "cleanupworker.h"
 
 #include <QCheckBox>
+#include <QDesktopServices>
+#include <QDir>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -19,6 +22,7 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QThread>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -193,10 +197,15 @@ void MainWindow::setupUninstallTab(QWidget *tab)
     m_appTableView->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_appTableView->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
     m_appTableView->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    m_appTableView->horizontalHeader()->setMinimumSectionSize(240);
     m_appTableView->setColumnWidth(0, 36);
     m_appTableView->setIconSize(QSize(24, 24));
-    m_appTableView->verticalHeader()->setDefaultSectionSize(32);
+    m_appTableView->verticalHeader()->setDefaultSectionSize(40);
+    m_appTableView->setWordWrap(true);
+    m_appTableView->setTextElideMode(Qt::ElideMiddle);
     m_appTableView->setSortingEnabled(false);
+    m_appTableView->setMouseTracking(true);
+    connect(m_appTableView, &QTableView::clicked, this, &MainWindow::onAppTableClicked);
 
     QHBoxLayout *actionLayout = new QHBoxLayout();
     m_uninstallButton = new QPushButton(QStringLiteral("正常卸载"), tab);
@@ -678,6 +687,36 @@ void MainWindow::onAppScanBatchReady(const QVector<InstalledApp> &apps, int tota
         QStringLiteral("正在加载软件列表，已发现 %1 款...").arg(totalCount));
 }
 
+void MainWindow::onAppTableClicked(const QModelIndex &index)
+{
+    if (!index.isValid() || index.column() != 4) {
+        return;
+    }
+
+    const QString path = index.data(Qt::DisplayRole).toString().trimmed();
+    if (path.isEmpty()) {
+        return;
+    }
+
+    QFileInfo info(path);
+    QString openPath = path;
+    if (!info.exists()) {
+        const QDir parentDir = info.dir();
+        if (parentDir.exists()) {
+            openPath = parentDir.absolutePath();
+        } else {
+            QMessageBox::warning(this, QStringLiteral("提示"),
+                                 QStringLiteral("路径不存在：\n%1").arg(path));
+            return;
+        }
+    }
+
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(openPath))) {
+        QMessageBox::warning(this, QStringLiteral("提示"),
+                             QStringLiteral("无法打开路径：\n%1").arg(openPath));
+    }
+}
+
 void MainWindow::onAppScanFinished(const QVector<InstalledApp> &apps)
 {
     setUninstallLoading(false);
@@ -687,6 +726,7 @@ void MainWindow::onAppScanFinished(const QVector<InstalledApp> &apps)
     m_appTableView->setSortingEnabled(true);
     m_appTableView->resizeColumnsToContents();
     m_appTableView->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    m_appTableView->resizeRowsToContents();
 
     if (apps.isEmpty()) {
         m_uninstallStatusLabel->setText(QStringLiteral("未发现可卸载软件，请尝试以管理员身份运行后刷新。"));

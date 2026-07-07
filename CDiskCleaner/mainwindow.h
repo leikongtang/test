@@ -46,6 +46,7 @@ private slots:
     void onAppScanBatchReady(const QVector<InstalledApp> &apps, int totalCount);
     void onAppScanFinished(const QVector<InstalledApp> &apps);
     void onAppUninstallFinished(bool success, const QString &message);
+    void onAppTableClicked(const QModelIndex &index);
 
 private:
     void setupUi();

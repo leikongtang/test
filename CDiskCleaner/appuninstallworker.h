@@ -26,7 +26,8 @@ public slots:
     void process();
 
 signals:
-    void scanFinished(const QVector<InstalledApp> &apps);
+    void scanBatchReady(const QVector<InstalledApp> &apps, int totalCount);
+    void scanFinished(int totalCount);
     void uninstallFinished(bool success, const QString &message);
 
 private:

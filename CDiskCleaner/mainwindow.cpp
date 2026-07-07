@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 
+#include "applistmodel.h"
 #include "appuninstaller.h"
 #include "appuninstallworker.h"
 #include "cleanupscanner.h"
@@ -14,6 +15,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QTabWidget>
+#include <QTableView>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QThread>
@@ -27,7 +29,9 @@ MainWindow::MainWindow(QWidget *parent)
     , m_worker(nullptr)
     , m_uninstallWorker(nullptr)
     , m_isBusy(false)
-    , m_isUninstallBusy(false)
+    , m_isUninstallLoading(false)
+    , m_appsLoadStarted(false)
+    , m_appsLoadFinished(false)
     , m_totalScannedBytes(0)
 {
     m_categories = CleanupScanner::defaultCategories();
@@ -36,7 +40,6 @@ MainWindow::MainWindow(QWidget *parent)
     setupUninstallWorker();
     refreshDiskInfo();
     updateSummary();
-    onRefreshAppsClicked();
 }
 
 MainWindow::~MainWindow()
@@ -57,7 +60,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::setupUi()
 {
-    setWindowTitle(QStringLiteral("C盘清理工具 v1.2.1"));
+    setWindowTitle(QStringLiteral("C盘清理工具 v1.2.2"));
     resize(1020, 720);
 
     m_tabWidget = new QTabWidget(this);
@@ -69,6 +72,8 @@ void MainWindow::setupUi()
 
     m_tabWidget->addTab(cleanupTab, QStringLiteral("磁盘清理"));
     m_tabWidget->addTab(uninstallTab, QStringLiteral("软件卸载"));
+
+    connect(m_tabWidget, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
 
     setCentralWidget(m_tabWidget);
 }
@@ -173,24 +178,21 @@ void MainWindow::setupUninstallTab(QWidget *tab)
     searchLayout->addWidget(m_uninstallSearchEdit, 1);
     searchLayout->addWidget(m_refreshAppsButton);
 
-    m_appTable = new QTableWidget(0, 5, tab);
-    m_appTable->setHorizontalHeaderLabels({
-        QStringLiteral("软件名称"),
-        QStringLiteral("版本"),
-        QStringLiteral("发布者"),
-        QStringLiteral("安装路径"),
-        QStringLiteral("大小")
-    });
-    m_appTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    m_appTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_appTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    m_appTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
-    m_appTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    m_appTable->verticalHeader()->setVisible(false);
-    m_appTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_appTable->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_appTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_appTable->setSortingEnabled(true);
+    m_appModel = new AppListModel(this);
+    m_appTableView = new QTableView(tab);
+    m_appTableView->setModel(m_appModel);
+    m_appTableView->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_appTableView->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_appTableView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_appTableView->setAlternatingRowColors(true);
+    m_appTableView->verticalHeader()->setVisible(false);
+    m_appTableView->horizontalHeader()->setStretchLastSection(false);
+    m_appTableView->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_appTableView->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_appTableView->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_appTableView->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    m_appTableView->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    m_appTableView->setSortingEnabled(true);
 
     QHBoxLayout *actionLayout = new QHBoxLayout();
     m_uninstallButton = new QPushButton(QStringLiteral("正常卸载"), tab);
@@ -207,14 +209,14 @@ void MainWindow::setupUninstallTab(QWidget *tab)
     m_uninstallProgressBar->setRange(0, 0);
     m_uninstallProgressBar->setVisible(false);
 
-    m_uninstallStatusLabel = new QLabel(QStringLiteral("请选择要卸载的软件。"), tab);
+    m_uninstallStatusLabel = new QLabel(QStringLiteral("切换到本页后将自动加载软件列表。"), tab);
 
     QLabel *tipLabel = new QLabel(
         QStringLiteral("提示：强制卸载会结束相关进程、删除安装目录并清理注册表项，请谨慎操作。系统组件已自动保护。"), tab);
     tipLabel->setStyleSheet(QStringLiteral("color: #666;"));
 
     mainLayout->addLayout(searchLayout);
-    mainLayout->addWidget(m_appTable, 1);
+    mainLayout->addWidget(m_appTableView, 1);
     mainLayout->addLayout(actionLayout);
     mainLayout->addWidget(m_uninstallProgressBar);
     mainLayout->addWidget(m_uninstallStatusLabel);
@@ -241,6 +243,7 @@ void MainWindow::setupUninstallWorker()
     m_uninstallWorker->moveToThread(m_uninstallWorkerThread);
 
     connect(m_uninstallWorkerThread, &QThread::started, m_uninstallWorker, &AppUninstallWorker::process);
+    connect(m_uninstallWorker, &AppUninstallWorker::scanBatchReady, this, &MainWindow::onAppScanBatchReady);
     connect(m_uninstallWorker, &AppUninstallWorker::scanFinished, this, &MainWindow::onAppScanFinished);
     connect(m_uninstallWorker, &AppUninstallWorker::uninstallFinished, this, &MainWindow::onAppUninstallFinished);
     connect(m_uninstallWorker, &AppUninstallWorker::scanFinished, m_uninstallWorkerThread, &QThread::quit);
@@ -259,15 +262,66 @@ void MainWindow::setUiBusy(bool busy)
     m_progressBar->setVisible(busy);
 }
 
-void MainWindow::setUninstallUiBusy(bool busy)
+void MainWindow::setUninstallLoading(bool loading)
 {
-    m_isUninstallBusy = busy;
-    m_refreshAppsButton->setEnabled(!busy);
-    m_uninstallButton->setEnabled(!busy);
-    m_forceUninstallButton->setEnabled(!busy);
-    m_uninstallSearchEdit->setEnabled(!busy);
-    m_appTable->setEnabled(!busy);
-    m_uninstallProgressBar->setVisible(busy);
+    m_isUninstallLoading = loading;
+    m_refreshAppsButton->setEnabled(!loading);
+    m_uninstallButton->setEnabled(!loading);
+    m_forceUninstallButton->setEnabled(!loading);
+    m_uninstallProgressBar->setVisible(loading);
+}
+
+void MainWindow::onTabChanged(int index)
+{
+    if (index == 1) {
+        startLoadAppsIfNeeded();
+    }
+}
+
+void MainWindow::startLoadAppsIfNeeded()
+{
+    if (m_appsLoadFinished || m_appsLoadStarted) {
+        return;
+    }
+
+    onRefreshAppsClicked();
+}
+
+bool MainWindow::matchesAppFilter(const InstalledApp &app, const QString &keyword) const
+{
+    if (keyword.isEmpty()) {
+        return true;
+    }
+
+    return app.displayName.contains(keyword, Qt::CaseInsensitive)
+           || app.publisher.contains(keyword, Qt::CaseInsensitive)
+           || app.installLocation.contains(keyword, Qt::CaseInsensitive);
+}
+
+void MainWindow::rebuildFilteredApps()
+{
+    const QString keyword = m_uninstallSearchEdit->text().trimmed();
+    QVector<InstalledApp> filteredApps;
+    filteredApps.reserve(m_installedApps.size());
+
+    for (const InstalledApp &app : m_installedApps) {
+        if (matchesAppFilter(app, keyword)) {
+            filteredApps.append(app);
+        }
+    }
+
+    m_appModel->setApps(filteredApps);
+    m_uninstallStatusLabel->setText(
+        QStringLiteral("共 %1 款软件，当前显示 %2 款。").arg(m_installedApps.size()).arg(filteredApps.size()));
+}
+
+InstalledApp MainWindow::currentSelectedApp() const
+{
+    const QModelIndex index = m_appTableView->currentIndex();
+    if (!index.isValid()) {
+        return InstalledApp();
+    }
+    return m_appModel->appAt(index.row());
 }
 
 void MainWindow::updateCategoryRow(int row, const CleanupCategory &category)
@@ -331,35 +385,6 @@ void MainWindow::updateSummary()
     }
 }
 
-void MainWindow::refreshAppTable()
-{
-    const bool wasSorting = m_appTable->isSortingEnabled();
-    m_appTable->setSortingEnabled(false);
-    m_appTable->setUpdatesEnabled(false);
-    m_appTable->setRowCount(m_filteredApps.size());
-
-    for (int i = 0; i < m_filteredApps.size(); ++i) {
-        const InstalledApp &app = m_filteredApps.at(i);
-        if (!m_appTable->item(i, 0)) {
-            m_appTable->setItem(i, 0, new QTableWidgetItem());
-            m_appTable->setItem(i, 1, new QTableWidgetItem());
-            m_appTable->setItem(i, 2, new QTableWidgetItem());
-            m_appTable->setItem(i, 3, new QTableWidgetItem());
-            m_appTable->setItem(i, 4, new QTableWidgetItem());
-        }
-        m_appTable->item(i, 0)->setText(app.displayName);
-        m_appTable->item(i, 1)->setText(app.displayVersion);
-        m_appTable->item(i, 2)->setText(app.publisher);
-        m_appTable->item(i, 3)->setText(app.installLocation);
-        m_appTable->item(i, 4)->setText(AppUninstaller::formatSize(app.estimatedSizeBytes));
-    }
-
-    m_appTable->setUpdatesEnabled(true);
-    m_appTable->setSortingEnabled(wasSorting);
-    m_uninstallStatusLabel->setText(
-        QStringLiteral("共 %1 款软件，当前显示 %2 款。").arg(m_installedApps.size()).arg(m_filteredApps.size()));
-}
-
 QVector<CleanupCategory> MainWindow::collectSelectedCategories() const
 {
     QVector<CleanupCategory> result;
@@ -370,15 +395,6 @@ QVector<CleanupCategory> MainWindow::collectSelectedCategories() const
         result.append(category);
     }
     return result;
-}
-
-InstalledApp MainWindow::currentSelectedApp() const
-{
-    const int row = m_appTable->currentRow();
-    if (row < 0 || row >= m_filteredApps.size()) {
-        return InstalledApp();
-    }
-    return m_filteredApps.at(row);
 }
 
 void MainWindow::refreshDiskInfo()
@@ -528,12 +544,17 @@ void MainWindow::onWorkerError(const QString &message)
 
 void MainWindow::onRefreshAppsClicked()
 {
-    if (m_isUninstallBusy) {
+    if (m_isUninstallLoading) {
         return;
     }
 
-    setUninstallUiBusy(true);
-    m_uninstallStatusLabel->setText(QStringLiteral("正在读取已安装软件列表..."));
+    m_installedApps.clear();
+    m_appModel->clearApps();
+    m_appsLoadStarted = true;
+    m_appsLoadFinished = false;
+
+    setUninstallLoading(true);
+    m_uninstallStatusLabel->setText(QStringLiteral("正在加载软件列表，请稍候..."));
 
     m_uninstallWorker->setMode(AppUninstallWorker::Mode::Scan);
 
@@ -546,28 +567,17 @@ void MainWindow::onRefreshAppsClicked()
 
 void MainWindow::onUninstallSearchChanged(const QString &text)
 {
-    m_filteredApps.clear();
-    const QString keyword = text.trimmed();
-
-    for (const InstalledApp &app : m_installedApps) {
-        if (keyword.isEmpty()
-            || app.displayName.contains(keyword, Qt::CaseInsensitive)
-            || app.publisher.contains(keyword, Qt::CaseInsensitive)
-            || app.installLocation.contains(keyword, Qt::CaseInsensitive)) {
-            m_filteredApps.append(app);
-        }
-    }
-
-    refreshAppTable();
+    Q_UNUSED(text)
+    rebuildFilteredApps();
 }
 
 void MainWindow::onUninstallClicked()
 {
-    if (m_isUninstallBusy) {
+    if (m_isUninstallLoading) {
         return;
     }
 
-    const InstalledApp app = currentSelectedApp();
+    const InstalledApp app = AppUninstaller::loadFullAppDetails(currentSelectedApp());
     if (app.displayName.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("请先选择要卸载的软件。"));
         return;
@@ -588,7 +598,7 @@ void MainWindow::onUninstallClicked()
         return;
     }
 
-    setUninstallUiBusy(true);
+    setUninstallLoading(true);
     m_uninstallStatusLabel->setText(QStringLiteral("正在卸载 %1 ...").arg(app.displayName));
     m_uninstallWorker->setMode(AppUninstallWorker::Mode::Uninstall);
     m_uninstallWorker->setTargetApp(app);
@@ -603,11 +613,11 @@ void MainWindow::onUninstallClicked()
 
 void MainWindow::onForceUninstallClicked()
 {
-    if (m_isUninstallBusy) {
+    if (m_isUninstallLoading) {
         return;
     }
 
-    const InstalledApp app = currentSelectedApp();
+    const InstalledApp app = AppUninstaller::loadFullAppDetails(currentSelectedApp());
     if (app.displayName.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("请先选择要卸载的软件。"));
         return;
@@ -625,7 +635,7 @@ void MainWindow::onForceUninstallClicked()
         return;
     }
 
-    setUninstallUiBusy(true);
+    setUninstallLoading(true);
     m_uninstallStatusLabel->setText(QStringLiteral("正在强制卸载 %1 ...").arg(app.displayName));
     m_uninstallWorker->setMode(AppUninstallWorker::Mode::Uninstall);
     m_uninstallWorker->setTargetApp(app);
@@ -638,21 +648,42 @@ void MainWindow::onForceUninstallClicked()
     m_uninstallWorkerThread->start();
 }
 
-void MainWindow::onAppScanFinished(const QVector<InstalledApp> &apps)
+void MainWindow::onAppScanBatchReady(const QVector<InstalledApp> &apps, int totalCount)
 {
-    setUninstallUiBusy(false);
-    m_installedApps = apps;
-    onUninstallSearchChanged(m_uninstallSearchEdit->text());
+    m_installedApps.append(apps);
+
+    const QString keyword = m_uninstallSearchEdit->text().trimmed();
+    if (keyword.isEmpty()) {
+        m_appTableView->setSortingEnabled(false);
+        m_appModel->appendApps(apps);
+    } else {
+        rebuildFilteredApps();
+    }
+
+    m_uninstallStatusLabel->setText(
+        QStringLiteral("正在加载软件列表，已发现 %1 款...").arg(totalCount));
+}
+
+void MainWindow::onAppScanFinished(int totalCount)
+{
+    setUninstallLoading(false);
+    m_appsLoadFinished = true;
+    rebuildFilteredApps();
+    m_appTableView->setSortingEnabled(true);
+    m_uninstallStatusLabel->setText(
+        QStringLiteral("加载完成，共 %1 款软件。").arg(totalCount));
 }
 
 void MainWindow::onAppUninstallFinished(bool success, const QString &message)
 {
-    setUninstallUiBusy(false);
+    setUninstallLoading(false);
     m_uninstallStatusLabel->setText(message);
     refreshDiskInfo();
 
     if (success) {
         QMessageBox::information(this, QStringLiteral("完成"), message);
+        m_appsLoadFinished = false;
+        m_appsLoadStarted = false;
         onRefreshAppsClicked();
     } else {
         QMessageBox::warning(this, QStringLiteral("卸载失败"), message);

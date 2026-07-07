@@ -1,4 +1,4 @@
-QT       += core gui
+QT       += core gui concurrent
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 CONFIG += c++11
@@ -11,7 +11,8 @@ SOURCES += \
     cleanupscanner.cpp \
     cleanupworker.cpp \
     appuninstaller.cpp \
-    appuninstallworker.cpp
+    appuninstallworker.cpp \
+    applistmodel.cpp
 
 HEADERS += \
     mainwindow.h \
@@ -20,7 +21,8 @@ HEADERS += \
     cleanupworker.h \
     installedapp.h \
     appuninstaller.h \
-    appuninstallworker.h
+    appuninstallworker.h \
+    applistmodel.h
 
 win32 {
     LIBS += -lshell32 -ladvapi32

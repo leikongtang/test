@@ -5,6 +5,8 @@
 
 #include <QVector>
 
+#include <functional>
+
 struct UninstallResult
 {
     bool success;
@@ -20,6 +22,8 @@ class AppUninstaller
 {
 public:
     static QVector<InstalledApp> enumerateInstalledApps();
+    static void enumerateInstalledAppsIncremental(const std::function<void(const InstalledApp &)> &callback);
+    static InstalledApp loadFullAppDetails(const InstalledApp &app);
     static UninstallResult uninstallApp(const InstalledApp &app, bool force);
     static QString formatSize(qint64 bytes);
 

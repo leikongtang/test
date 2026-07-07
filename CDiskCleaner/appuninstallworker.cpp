@@ -26,10 +26,28 @@ void AppUninstallWorker::setForceUninstall(bool force)
 void AppUninstallWorker::process()
 {
     if (m_mode == Mode::Scan) {
-        emit scanFinished(AppUninstaller::enumerateInstalledApps());
+        QVector<InstalledApp> batch;
+        batch.reserve(40);
+        int totalCount = 0;
+
+        AppUninstaller::enumerateInstalledAppsIncremental([&](const InstalledApp &app) {
+            batch.append(app);
+            ++totalCount;
+            if (batch.size() >= 40) {
+                emit scanBatchReady(batch, totalCount);
+                batch.clear();
+            }
+        });
+
+        if (!batch.isEmpty()) {
+            emit scanBatchReady(batch, totalCount);
+        }
+
+        emit scanFinished(totalCount);
         return;
     }
 
-    const UninstallResult result = AppUninstaller::uninstallApp(m_targetApp, m_forceUninstall);
+    InstalledApp app = AppUninstaller::loadFullAppDetails(m_targetApp);
+    const UninstallResult result = AppUninstaller::uninstallApp(app, m_forceUninstall);
     emit uninstallFinished(result.success, result.message);
 }

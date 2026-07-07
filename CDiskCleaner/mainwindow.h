@@ -7,12 +7,14 @@
 #include <QMainWindow>
 #include <QVector>
 
+class AppListModel;
 class QCheckBox;
 class QLabel;
 class QLineEdit;
 class QProgressBar;
 class QPushButton;
 class QTabWidget;
+class QTableView;
 class QTableWidget;
 class QThread;
 class CleanupWorker;
@@ -35,12 +37,14 @@ private slots:
     void onWorkerFinished(bool success, qint64 totalBytes, const QString &message);
     void onWorkerError(const QString &message);
     void refreshDiskInfo();
+    void onTabChanged(int index);
 
     void onRefreshAppsClicked();
     void onUninstallSearchChanged(const QString &text);
     void onUninstallClicked();
     void onForceUninstallClicked();
-    void onAppScanFinished(const QVector<InstalledApp> &apps);
+    void onAppScanBatchReady(const QVector<InstalledApp> &apps, int totalCount);
+    void onAppScanFinished(int totalCount);
     void onAppUninstallFinished(bool success, const QString &message);
 
 private:
@@ -50,10 +54,12 @@ private:
     void setupWorker();
     void setupUninstallWorker();
     void setUiBusy(bool busy);
-    void setUninstallUiBusy(bool busy);
+    void setUninstallLoading(bool loading);
+    void startLoadAppsIfNeeded();
     void updateCategoryRow(int row, const CleanupCategory &category);
     void updateSummary();
-    void refreshAppTable();
+    void rebuildFilteredApps();
+    bool matchesAppFilter(const InstalledApp &app, const QString &keyword) const;
     QVector<CleanupCategory> collectSelectedCategories() const;
     InstalledApp currentSelectedApp() const;
 
@@ -77,17 +83,19 @@ private:
     QPushButton *m_forceUninstallButton;
     QLineEdit *m_uninstallSearchEdit;
     QTableWidget *m_categoryTable;
-    QTableWidget *m_appTable;
+    QTableView *m_appTableView;
+    AppListModel *m_appModel;
 
     QVector<CleanupCategory> m_categories;
     QVector<InstalledApp> m_installedApps;
-    QVector<InstalledApp> m_filteredApps;
     QThread *m_workerThread;
     QThread *m_uninstallWorkerThread;
     CleanupWorker *m_worker;
     AppUninstallWorker *m_uninstallWorker;
     bool m_isBusy;
-    bool m_isUninstallBusy;
+    bool m_isUninstallLoading;
+    bool m_appsLoadStarted;
+    bool m_appsLoadFinished;
     qint64 m_totalScannedBytes;
 };
 

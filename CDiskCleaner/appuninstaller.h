@@ -25,7 +25,6 @@ public:
 
 private:
     static InstalledApp readAppFromRegistryKey(const QString &rootPath, const QString &subKey);
-    static QString readRegistryString(const QString &keyPath, const QString &valueName);
     static bool terminateRelatedProcesses(const InstalledApp &app);
     static bool runUninstallCommand(const QString &command, int timeoutMs);
     static bool removeInstallDirectory(const QString &path);

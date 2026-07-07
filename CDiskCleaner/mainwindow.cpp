@@ -57,7 +57,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::setupUi()
 {
-    setWindowTitle(QStringLiteral("C盘清理工具 v1.2.0"));
+    setWindowTitle(QStringLiteral("C盘清理工具 v1.2.1"));
     resize(1020, 720);
 
     m_tabWidget = new QTabWidget(this);
@@ -335,17 +335,26 @@ void MainWindow::refreshAppTable()
 {
     const bool wasSorting = m_appTable->isSortingEnabled();
     m_appTable->setSortingEnabled(false);
+    m_appTable->setUpdatesEnabled(false);
     m_appTable->setRowCount(m_filteredApps.size());
 
     for (int i = 0; i < m_filteredApps.size(); ++i) {
         const InstalledApp &app = m_filteredApps.at(i);
-        m_appTable->setItem(i, 0, new QTableWidgetItem(app.displayName));
-        m_appTable->setItem(i, 1, new QTableWidgetItem(app.displayVersion));
-        m_appTable->setItem(i, 2, new QTableWidgetItem(app.publisher));
-        m_appTable->setItem(i, 3, new QTableWidgetItem(app.installLocation));
-        m_appTable->setItem(i, 4, new QTableWidgetItem(AppUninstaller::formatSize(app.estimatedSizeBytes)));
+        if (!m_appTable->item(i, 0)) {
+            m_appTable->setItem(i, 0, new QTableWidgetItem());
+            m_appTable->setItem(i, 1, new QTableWidgetItem());
+            m_appTable->setItem(i, 2, new QTableWidgetItem());
+            m_appTable->setItem(i, 3, new QTableWidgetItem());
+            m_appTable->setItem(i, 4, new QTableWidgetItem());
+        }
+        m_appTable->item(i, 0)->setText(app.displayName);
+        m_appTable->item(i, 1)->setText(app.displayVersion);
+        m_appTable->item(i, 2)->setText(app.publisher);
+        m_appTable->item(i, 3)->setText(app.installLocation);
+        m_appTable->item(i, 4)->setText(AppUninstaller::formatSize(app.estimatedSizeBytes));
     }
 
+    m_appTable->setUpdatesEnabled(true);
     m_appTable->setSortingEnabled(wasSorting);
     m_uninstallStatusLabel->setText(
         QStringLiteral("共 %1 款软件，当前显示 %2 款。").arg(m_installedApps.size()).arg(m_filteredApps.size()));

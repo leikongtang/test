@@ -4,6 +4,7 @@
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QProcess>
+#include <QSet>
 
 #include <algorithm>
 
@@ -14,39 +15,36 @@
 
 namespace {
 
+QString normalizePath(const QString &path)
+{
+    return QDir::fromNativeSeparators(path).trimmed();
+}
+
 #ifdef Q_OS_WIN
 QString fromWideString(const wchar_t *text)
 {
     return text ? QString::fromWCharArray(text) : QString();
 }
 
-QString queryRegistryValue(HKEY rootKey, const QString &subKey, const QString &valueName)
+QString queryValueFromKey(HKEY hKey, const wchar_t *valueName)
 {
-    HKEY hKey = nullptr;
-    const std::wstring subKeyW = subKey.toStdWString();
-    const std::wstring valueNameW = valueName.toStdWString();
-
-    if (RegOpenKeyExW(rootKey, subKeyW.c_str(), 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
+    if (!hKey) {
         return QString();
     }
 
     DWORD type = 0;
     DWORD dataSize = 0;
-    LONG querySize = RegQueryValueExW(hKey, valueNameW.c_str(), nullptr, &type, nullptr, &dataSize);
-    if (querySize != ERROR_SUCCESS || dataSize == 0) {
-        RegCloseKey(hKey);
+    if (RegQueryValueExW(hKey, valueName, nullptr, &type, nullptr, &dataSize) != ERROR_SUCCESS
+        || dataSize == 0) {
         return QString();
     }
 
     QByteArray buffer;
     buffer.resize(static_cast<int>(dataSize));
-    if (RegQueryValueExW(hKey, valueNameW.c_str(), nullptr, &type,
+    if (RegQueryValueExW(hKey, valueName, nullptr, &type,
                          reinterpret_cast<LPBYTE>(buffer.data()), &dataSize) != ERROR_SUCCESS) {
-        RegCloseKey(hKey);
         return QString();
     }
-
-    RegCloseKey(hKey);
 
     if (type == REG_SZ || type == REG_EXPAND_SZ) {
         return QString::fromWCharArray(reinterpret_cast<const wchar_t *>(buffer.constData()));
@@ -57,55 +55,91 @@ QString queryRegistryValue(HKEY rootKey, const QString &subKey, const QString &v
     return QString();
 }
 
-bool queryRegistryDword(HKEY rootKey, const QString &subKey, const QString &valueName, DWORD *value)
+bool queryDwordFromKey(HKEY hKey, const wchar_t *valueName, DWORD *value)
 {
-    HKEY hKey = nullptr;
-    const std::wstring subKeyW = subKey.toStdWString();
-    const std::wstring valueNameW = valueName.toStdWString();
-
-    if (RegOpenKeyExW(rootKey, subKeyW.c_str(), 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
+    if (!hKey || !value) {
         return false;
     }
 
     DWORD type = 0;
     DWORD data = 0;
     DWORD dataSize = sizeof(DWORD);
-    const LONG result = RegQueryValueExW(hKey, valueNameW.c_str(), nullptr, &type,
-                                         reinterpret_cast<LPBYTE>(&data), &dataSize);
-    RegCloseKey(hKey);
-
-    if (result != ERROR_SUCCESS || type != REG_DWORD) {
+    if (RegQueryValueExW(hKey, valueName, nullptr, &type,
+                         reinterpret_cast<LPBYTE>(&data), &dataSize) != ERROR_SUCCESS
+        || type != REG_DWORD) {
         return false;
     }
 
-    if (value) {
-        *value = data;
-    }
+    *value = data;
     return true;
 }
 
-QStringList enumRegistrySubKeys(HKEY rootKey, const QString &subKey)
+InstalledApp readAppFromOpenKey(HKEY hKey, const QString &rootPath, const QString &subKey)
 {
-    QStringList keys;
-    HKEY hKey = nullptr;
-    const std::wstring subKeyW = subKey.toStdWString();
+    InstalledApp app;
+    app.registryPath = rootPath;
+    app.registryKey = subKey;
 
-    if (RegOpenKeyExW(rootKey, subKeyW.c_str(), 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
-        return keys;
+    app.displayName = queryValueFromKey(hKey, L"DisplayName").trimmed();
+    if (app.displayName.isEmpty()) {
+        return app;
+    }
+
+    DWORD systemComponent = 0;
+    if (queryDwordFromKey(hKey, L"SystemComponent", &systemComponent) && systemComponent == 1) {
+        app.isSystemComponent = true;
+        return app;
+    }
+
+    app.displayVersion = queryValueFromKey(hKey, L"DisplayVersion").trimmed();
+    app.publisher = queryValueFromKey(hKey, L"Publisher").trimmed();
+    app.installLocation = normalizePath(queryValueFromKey(hKey, L"InstallLocation"));
+    app.uninstallString = queryValueFromKey(hKey, L"UninstallString").trimmed();
+    app.quietUninstallString = queryValueFromKey(hKey, L"QuietUninstallString").trimmed();
+
+    DWORD noRemove = 0;
+    if (queryDwordFromKey(hKey, L"NoRemove", &noRemove)) {
+        app.noRemove = (noRemove == 1);
+    }
+
+    DWORD estimatedSizeKb = 0;
+    if (queryDwordFromKey(hKey, L"EstimatedSize", &estimatedSizeKb)) {
+        app.estimatedSizeBytes = static_cast<qint64>(estimatedSizeKb) * 1024;
+    }
+
+    return app;
+}
+
+void enumerateFromRegistryRoot(HKEY rootKey, const QString &rootPath, QVector<InstalledApp> &apps)
+{
+    const QString subRoot = rootPath.mid(rootPath.indexOf(QLatin1Char('\\')) + 1);
+    const std::wstring subRootW = subRoot.toStdWString();
+
+    HKEY hParent = nullptr;
+    if (RegOpenKeyExW(rootKey, subRootW.c_str(), 0, KEY_READ, &hParent) != ERROR_SUCCESS) {
+        return;
     }
 
     wchar_t keyName[512];
     DWORD index = 0;
     DWORD nameLen = sizeof(keyName) / sizeof(wchar_t);
 
-    while (RegEnumKeyExW(hKey, index, keyName, &nameLen, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-        keys.append(fromWideString(keyName));
+    while (RegEnumKeyExW(hParent, index, keyName, &nameLen, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
+        HKEY hAppKey = nullptr;
+        if (RegOpenKeyExW(hParent, keyName, 0, KEY_READ, &hAppKey) == ERROR_SUCCESS) {
+            const QString subKey = fromWideString(keyName);
+            const InstalledApp app = readAppFromOpenKey(hAppKey, rootPath, subKey);
+            if (!app.displayName.isEmpty() && !app.isSystemComponent) {
+                apps.append(app);
+            }
+            RegCloseKey(hAppKey);
+        }
+
         ++index;
         nameLen = sizeof(keyName) / sizeof(wchar_t);
     }
 
-    RegCloseKey(hKey);
-    return keys;
+    RegCloseKey(hParent);
 }
 
 bool deleteRegistryTree(HKEY rootKey, const QString &subKey)
@@ -115,122 +149,46 @@ bool deleteRegistryTree(HKEY rootKey, const QString &subKey)
 }
 #endif
 
-QString normalizePath(const QString &path)
+QString makeAppDedupKey(const InstalledApp &app)
 {
-    return QDir::fromNativeSeparators(path).trimmed();
-}
-
-QString readRegistryStringImpl(const QString &keyPath, const QString &valueName)
-{
-#ifdef Q_OS_WIN
-    HKEY rootKey = HKEY_LOCAL_MACHINE;
-    QString subKey = keyPath;
-
-    if (keyPath.startsWith(QStringLiteral("HKLM\\"), Qt::CaseInsensitive)) {
-        rootKey = HKEY_LOCAL_MACHINE;
-        subKey = keyPath.mid(5);
-    } else if (keyPath.startsWith(QStringLiteral("HKCU\\"), Qt::CaseInsensitive)) {
-        rootKey = HKEY_CURRENT_USER;
-        subKey = keyPath.mid(5);
-    }
-
-    return queryRegistryValue(rootKey, subKey, valueName);
-#else
-    Q_UNUSED(keyPath)
-    Q_UNUSED(valueName)
-    return QString();
-#endif
-}
-
-bool readRegistryDword(const QString &keyPath, const QString &valueName, DWORD *value)
-{
-#ifdef Q_OS_WIN
-    HKEY rootKey = HKEY_LOCAL_MACHINE;
-    QString subKey = keyPath;
-
-    if (keyPath.startsWith(QStringLiteral("HKLM\\"), Qt::CaseInsensitive)) {
-        rootKey = HKEY_LOCAL_MACHINE;
-        subKey = keyPath.mid(5);
-    } else if (keyPath.startsWith(QStringLiteral("HKCU\\"), Qt::CaseInsensitive)) {
-        rootKey = HKEY_CURRENT_USER;
-        subKey = keyPath.mid(5);
-    }
-
-    return queryRegistryDword(rootKey, subKey, valueName, value);
-#else
-    Q_UNUSED(keyPath)
-    Q_UNUSED(valueName)
-    Q_UNUSED(value)
-    return false;
-#endif
-}
-
-InstalledApp readAppFromRegistryKeyImpl(const QString &rootPath, const QString &subKey)
-{
-    InstalledApp app;
-    app.registryPath = rootPath;
-    app.registryKey = subKey;
-
-    const QString keyPath = rootPath + QStringLiteral("\\") + subKey;
-    app.displayName = readRegistryStringImpl(keyPath, QStringLiteral("DisplayName")).trimmed();
-    app.displayVersion = readRegistryStringImpl(keyPath, QStringLiteral("DisplayVersion")).trimmed();
-    app.publisher = readRegistryStringImpl(keyPath, QStringLiteral("Publisher")).trimmed();
-    app.installLocation = normalizePath(readRegistryStringImpl(keyPath, QStringLiteral("InstallLocation")));
-    app.uninstallString = readRegistryStringImpl(keyPath, QStringLiteral("UninstallString")).trimmed();
-    app.quietUninstallString = readRegistryStringImpl(keyPath, QStringLiteral("QuietUninstallString")).trimmed();
-
-    DWORD systemComponent = 0;
-    if (readRegistryDword(keyPath, QStringLiteral("SystemComponent"), &systemComponent)) {
-        app.isSystemComponent = (systemComponent == 1);
-    }
-
-    DWORD noRemove = 0;
-    if (readRegistryDword(keyPath, QStringLiteral("NoRemove"), &noRemove)) {
-        app.noRemove = (noRemove == 1);
-    }
-
-    DWORD estimatedSizeKb = 0;
-    if (readRegistryDword(keyPath, QStringLiteral("EstimatedSize"), &estimatedSizeKb)) {
-        app.estimatedSizeBytes = static_cast<qint64>(estimatedSizeKb) * 1024;
-    }
-
-    return app;
-}
-
-void enumerateFromRegistryRoot(HKEY rootKey, const QString &rootPath, QVector<InstalledApp> &apps)
-{
-#ifdef Q_OS_WIN
-    const QString subRoot = rootPath.mid(rootPath.indexOf('\\') + 1);
-    const QStringList subKeys = enumRegistrySubKeys(rootKey, subRoot);
-    for (const QString &subKey : subKeys) {
-        const InstalledApp app = readAppFromRegistryKeyImpl(rootPath, subKey);
-        if (app.displayName.isEmpty() || app.isSystemComponent) {
-            continue;
-        }
-        apps.append(app);
-    }
-#else
-    Q_UNUSED(rootKey)
-    Q_UNUSED(rootPath)
-    Q_UNUSED(apps)
-#endif
+    return app.displayName.toLower() + QChar(0x1F) + app.displayVersion.toLower();
 }
 
 } // namespace
 
-QString AppUninstaller::readRegistryString(const QString &keyPath, const QString &valueName)
-{
-    return readRegistryStringImpl(keyPath, valueName);
-}
-
 InstalledApp AppUninstaller::readAppFromRegistryKey(const QString &rootPath, const QString &subKey)
 {
-    return readAppFromRegistryKeyImpl(rootPath, subKey);
+#ifdef Q_OS_WIN
+    HKEY rootKey = HKEY_LOCAL_MACHINE;
+    QString regSubKey = rootPath.mid(rootPath.indexOf(QLatin1Char('\\')) + 1)
+                        + QStringLiteral("\\") + subKey;
+    if (rootPath.startsWith(QStringLiteral("HKCU\\"), Qt::CaseInsensitive)) {
+        rootKey = HKEY_CURRENT_USER;
+        regSubKey = rootPath.mid(5) + QStringLiteral("\\") + subKey;
+    } else if (rootPath.startsWith(QStringLiteral("HKLM\\"), Qt::CaseInsensitive)) {
+        regSubKey = rootPath.mid(5) + QStringLiteral("\\") + subKey;
+    }
+
+    HKEY hAppKey = nullptr;
+    const std::wstring regSubKeyW = regSubKey.toStdWString();
+    if (RegOpenKeyExW(rootKey, regSubKeyW.c_str(), 0, KEY_READ, &hAppKey) != ERROR_SUCCESS) {
+        return InstalledApp();
+    }
+
+    const InstalledApp app = readAppFromOpenKey(hAppKey, rootPath, subKey);
+    RegCloseKey(hAppKey);
+    return app;
+#else
+    Q_UNUSED(rootPath)
+    Q_UNUSED(subKey)
+    return InstalledApp();
+#endif
 }
 
 QVector<InstalledApp> AppUninstaller::enumerateInstalledApps()
 {
     QVector<InstalledApp> apps;
+    apps.reserve(512);
 
 #ifdef Q_OS_WIN
     enumerateFromRegistryRoot(HKEY_LOCAL_MACHINE,
@@ -243,15 +201,24 @@ QVector<InstalledApp> AppUninstaller::enumerateInstalledApps()
                               QStringLiteral("HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
                               apps);
 
-    std::sort(apps.begin(), apps.end(), [](const InstalledApp &a, const InstalledApp &b) {
+    QVector<InstalledApp> uniqueApps;
+    uniqueApps.reserve(apps.size());
+    QSet<QString> seenKeys;
+
+    for (const InstalledApp &app : apps) {
+        const QString dedupKey = makeAppDedupKey(app);
+        if (seenKeys.contains(dedupKey)) {
+            continue;
+        }
+        seenKeys.insert(dedupKey);
+        uniqueApps.append(app);
+    }
+
+    std::sort(uniqueApps.begin(), uniqueApps.end(), [](const InstalledApp &a, const InstalledApp &b) {
         return a.displayName.compare(b.displayName, Qt::CaseInsensitive) < 0;
     });
 
-    apps.erase(std::unique(apps.begin(), apps.end(), [](const InstalledApp &a, const InstalledApp &b) {
-                   return a.displayName.compare(b.displayName, Qt::CaseInsensitive) == 0
-                          && a.displayVersion == b.displayVersion;
-               }),
-               apps.end());
+    return uniqueApps;
 #endif
 
     return apps;

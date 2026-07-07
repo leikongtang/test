@@ -129,14 +129,30 @@ void enumerateFromRegistryRootIncremental(HKEY rootKey,
         return;
     }
 
-    wchar_t keyName[512];
     DWORD index = 0;
-    DWORD nameLen = sizeof(keyName) / sizeof(wchar_t);
+    while (true) {
+        DWORD nameLen = 0;
+        LONG result = RegEnumKeyExW(hParent, index, nullptr, &nameLen, nullptr, nullptr, nullptr, nullptr);
+        if (result == ERROR_NO_MORE_ITEMS) {
+            break;
+        }
+        if (result != ERROR_SUCCESS && result != ERROR_MORE_DATA) {
+            ++index;
+            continue;
+        }
 
-    while (RegEnumKeyExW(hParent, index, keyName, &nameLen, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
+        ++nameLen;
+        QVector<wchar_t> keyNameBuffer(static_cast<int>(nameLen), L'\0');
+        nameLen = static_cast<DWORD>(keyNameBuffer.size());
+        result = RegEnumKeyExW(hParent, index, keyNameBuffer.data(), &nameLen, nullptr, nullptr, nullptr, nullptr);
+        if (result != ERROR_SUCCESS) {
+            ++index;
+            continue;
+        }
+
         HKEY hAppKey = nullptr;
-        if (RegOpenKeyExW(hParent, keyName, 0, KEY_READ, &hAppKey) == ERROR_SUCCESS) {
-            const QString subKey = fromWideString(keyName);
+        if (RegOpenKeyExW(hParent, keyNameBuffer.data(), 0, KEY_READ, &hAppKey) == ERROR_SUCCESS) {
+            const QString subKey = fromWideString(keyNameBuffer.data());
             const InstalledApp app = readAppFromOpenKey(hAppKey, rootPath, subKey, listOnly);
             if (!app.displayName.isEmpty() && !app.isSystemComponent) {
                 callback(app);
@@ -145,7 +161,6 @@ void enumerateFromRegistryRootIncremental(HKEY rootKey,
         }
 
         ++index;
-        nameLen = sizeof(keyName) / sizeof(wchar_t);
     }
 
     RegCloseKey(hParent);
@@ -167,7 +182,71 @@ bool deleteRegistryTree(HKEY rootKey, const QString &subKey)
 
 QString makeAppDedupKey(const InstalledApp &app)
 {
-    return app.displayName.toLower() + QChar(0x1F) + app.displayVersion.toLower();
+    if (app.isAppxPackage) {
+        return QStringLiteral("appx:") + app.packageFullName.toLower();
+    }
+    return app.registryPath.toLower() + QChar(0x1F) + app.registryKey.toLower();
+}
+
+QVector<InstalledApp> collectAppxPackages()
+{
+    QVector<InstalledApp> apps;
+
+    QProcess process;
+    const QString script = QStringLiteral(
+        "Get-AppxPackage | Where-Object { -not $_.IsFramework -and $_.InstallLocation } | "
+        "ForEach-Object {"
+        "  $dn = $_.Name;"
+        "  $manifest = Join-Path $_.InstallLocation 'AppxManifest.xml';"
+        "  if (Test-Path $manifest) {"
+        "    try {"
+        "      $xml = [xml](Get-Content $manifest);"
+        "      $val = $xml.Package.Properties.DisplayName;"
+        "      if ($val -and $val -notlike 'ms-resource:*') { $dn = $val }"
+        "    } catch {}"
+        "  }"
+        "  $dn + [char]31 + $_.Version.ToString() + [char]31 + $_.Publisher + [char]31 + "
+        "  $_.InstallLocation + [char]31 + $_.PackageFullName"
+        "}");
+    process.start(QStringLiteral("powershell"),
+                  {QStringLiteral("-NoProfile"),
+                   QStringLiteral("-ExecutionPolicy"),
+                   QStringLiteral("Bypass"),
+                   QStringLiteral("-Command"),
+                   script});
+
+    if (!process.waitForFinished(120000)) {
+        process.kill();
+        return apps;
+    }
+
+    const QString output = QString::fromUtf8(process.readAllStandardOutput());
+    const QStringList lines = output.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    for (const QString &line : lines) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.isEmpty()) {
+            continue;
+        }
+
+        const QStringList fields = trimmed.split(QChar(0x1F));
+        if (fields.size() < 5) {
+            continue;
+        }
+
+        InstalledApp app;
+        app.isAppxPackage = true;
+        app.displayName = fields.at(0).trimmed();
+        app.displayVersion = fields.at(1).trimmed();
+        app.publisher = fields.at(2).trimmed();
+        app.installLocation = normalizePath(fields.at(3));
+        app.packageFullName = fields.at(4).trimmed();
+        if (app.displayName.isEmpty() || app.packageFullName.isEmpty()) {
+            continue;
+        }
+        apps.append(app);
+    }
+
+    return apps;
 }
 
 QVector<InstalledApp> mergeAndSortApps(QVector<InstalledApp> apps)
@@ -237,27 +316,34 @@ InstalledApp AppUninstaller::readAppFromRegistryKey(const QString &rootPath, con
 QVector<InstalledApp> AppUninstaller::enumerateInstalledApps()
 {
 #ifdef Q_OS_WIN
-    QFuture<QVector<InstalledApp>> futureLocalMachine = QtConcurrent::run([]() {
-        return collectAppsFromRegistryRoot(
-            HKEY_LOCAL_MACHINE,
-            QStringLiteral("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
-    });
-    QFuture<QVector<InstalledApp>> futureWow64 = QtConcurrent::run([]() {
-        return collectAppsFromRegistryRoot(
-            HKEY_LOCAL_MACHINE,
-            QStringLiteral("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
-    });
-    QFuture<QVector<InstalledApp>> futureCurrentUser = QtConcurrent::run([]() {
-        return collectAppsFromRegistryRoot(
-            HKEY_CURRENT_USER,
-            QStringLiteral("HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
+    const QStringList registryRoots = {
+        QStringLiteral("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
+        QStringLiteral("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
+        QStringLiteral("HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
+        QStringLiteral("HKCU\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall")
+    };
+
+    QVector<QFuture<QVector<InstalledApp>>> futures;
+    futures.reserve(registryRoots.size());
+    for (const QString &rootPath : registryRoots) {
+        futures.append(QtConcurrent::run([rootPath]() {
+            HKEY rootKey = rootPath.startsWith(QStringLiteral("HKCU\\"), Qt::CaseInsensitive)
+                               ? HKEY_CURRENT_USER
+                               : HKEY_LOCAL_MACHINE;
+            return collectAppsFromRegistryRoot(rootKey, rootPath);
+        }));
+    }
+
+    QFuture<QVector<InstalledApp>> futureAppx = QtConcurrent::run([]() {
+        return collectAppxPackages();
     });
 
     QVector<InstalledApp> apps;
     apps.reserve(512);
-    apps += futureLocalMachine.result();
-    apps += futureWow64.result();
-    apps += futureCurrentUser.result();
+    for (QFuture<QVector<InstalledApp>> &future : futures) {
+        apps += future.result();
+    }
+    apps += futureAppx.result();
 
     return mergeAndSortApps(apps);
 #else
@@ -275,6 +361,10 @@ void AppUninstaller::enumerateInstalledAppsIncremental(const std::function<void(
 
 InstalledApp AppUninstaller::loadFullAppDetails(const InstalledApp &app)
 {
+    if (app.isAppxPackage) {
+        return app;
+    }
+
     if (!app.uninstallString.isEmpty() || !app.quietUninstallString.isEmpty()) {
         return app;
     }
@@ -289,6 +379,23 @@ InstalledApp AppUninstaller::loadFullAppDetails(const InstalledApp &app)
 bool AppUninstaller::isProtectedApp(const InstalledApp &app)
 {
     const QString name = app.displayName.toLower();
+    if (app.isAppxPackage) {
+        const QString pkg = app.packageFullName.toLower();
+        static const QStringList protectedPrefixes = {
+            QStringLiteral("microsoft.windows."),
+            QStringLiteral("microsoft.desktopappinstaller"),
+            QStringLiteral("microsoft.storepurchaseapp"),
+            QStringLiteral("windows.immersivecontrolpanel"),
+            QStringLiteral("microsoft.windowsstore"),
+            QStringLiteral("microsoft.windows.defender")
+        };
+        for (const QString &prefix : protectedPrefixes) {
+            if (pkg.startsWith(prefix) || name.contains(prefix)) {
+                return true;
+            }
+        }
+    }
+
     static const QStringList protectedNames = {
         QStringLiteral("microsoft visual c++"),
         QStringLiteral(".net"),
@@ -384,6 +491,33 @@ bool AppUninstaller::runUninstallCommand(const QString &command, int timeoutMs)
         return false;
     }
 
+    if (command.startsWith(QStringLiteral("appx:"))) {
+        const QString packageFullName = command.mid(5);
+        if (packageFullName.isEmpty()) {
+            return false;
+        }
+
+        QString escapedPackage = packageFullName;
+        escapedPackage.replace(QLatin1Char('\''), QLatin1String("''"));
+
+        QProcess process;
+        process.start(QStringLiteral("powershell"),
+                      {QStringLiteral("-NoProfile"),
+                       QStringLiteral("-ExecutionPolicy"),
+                       QStringLiteral("Bypass"),
+                       QStringLiteral("-Command"),
+                       QStringLiteral("Remove-AppxPackage -Package '%1'").arg(escapedPackage)});
+        if (!process.waitForStarted(10000)) {
+            return false;
+        }
+        if (!process.waitForFinished(timeoutMs)) {
+            process.kill();
+            process.waitForFinished(3000);
+            return false;
+        }
+        return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+    }
+
     QString program;
     QStringList arguments;
     const QString trimmed = command.trimmed();
@@ -473,6 +607,19 @@ UninstallResult AppUninstaller::uninstallApp(const InstalledApp &app, bool force
 
     if (isProtectedApp(app)) {
         result.message = QStringLiteral("该软件属于系统或关键组件，已阻止卸载。");
+        return result;
+    }
+
+    if (app.isAppxPackage) {
+        terminateRelatedProcesses(app);
+        const bool uninstallOk = runUninstallCommand(
+            QStringLiteral("appx:%1").arg(app.packageFullName), force ? 120000 : 180000);
+        if (uninstallOk) {
+            result.success = true;
+            result.message = QStringLiteral("卸载完成：%1").arg(app.displayName);
+            return result;
+        }
+        result.message = QStringLiteral("卸载失败：%1。可尝试关闭相关程序后重试。").arg(app.displayName);
         return result;
     }
 

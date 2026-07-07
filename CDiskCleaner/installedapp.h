@@ -17,21 +17,29 @@ struct InstalledApp
     QString quietUninstallString;
     QString registryPath;
     QString registryKey;
+    QString packageFullName;
     qint64 estimatedSizeBytes;
     bool isSystemComponent;
+    bool isAppxPackage;
     bool noRemove;
 
     InstalledApp()
         : estimatedSizeBytes(0)
         , isSystemComponent(false)
+        , isAppxPackage(false)
         , noRemove(false)
     {
     }
 
     bool canUninstall() const
     {
-        return !noRemove && !displayName.isEmpty()
-               && (!uninstallString.isEmpty() || !installLocation.isEmpty());
+        if (noRemove || displayName.isEmpty()) {
+            return false;
+        }
+        if (isAppxPackage) {
+            return !packageFullName.isEmpty();
+        }
+        return !uninstallString.isEmpty() || !installLocation.isEmpty();
     }
 };
 

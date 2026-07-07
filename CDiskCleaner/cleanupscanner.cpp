@@ -448,6 +448,31 @@ QVector<CleanupCategory> CleanupScanner::defaultCategories()
     return categories;
 }
 
+void CleanupScanner::refreshDynamicCategoryPaths(QVector<CleanupCategory> &categories)
+{
+    const QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
+
+    for (CleanupCategory &category : categories) {
+        switch (category.id) {
+        case CleanupCategory::Id::ChromeCache:
+            category.paths = discoverChromiumCachePaths(localAppData + QStringLiteral("/Google/Chrome/User Data"));
+            break;
+        case CleanupCategory::Id::EdgeCache:
+            category.paths = discoverChromiumCachePaths(localAppData + QStringLiteral("/Microsoft/Edge/User Data"));
+            break;
+        case CleanupCategory::Id::FirefoxCache:
+            category.paths = discoverFirefoxCachePaths();
+            break;
+        case CleanupCategory::Id::WpsCache:
+            category.paths = discoverWpsCachePaths();
+            break;
+        default:
+            continue;
+        }
+        category.path = category.paths.isEmpty() ? QString() : category.paths.first();
+    }
+}
+
 qint64 CleanupScanner::calculateDirectorySize(const QString &path, bool *cancelled)
 {
     if (path.isEmpty()) {

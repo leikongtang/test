@@ -6,6 +6,8 @@
 #include <QColor>
 #include <QFont>
 
+#include <algorithm>
+
 namespace {
 
 QString resolveIconPath(const QString &displayIcon)
@@ -136,6 +138,43 @@ QVariant AppListModel::data(const QModelIndex &index, int role) const
     default:
         return QVariant();
     }
+}
+
+void AppListModel::sort(int column, Qt::SortOrder order)
+{
+    if (column < 0 || column >= columnCount()) {
+        return;
+    }
+
+    const auto compareString = [order](const QString &a, const QString &b) {
+        const int result = QString::compare(a, b, Qt::CaseInsensitive);
+        return order == Qt::AscendingOrder ? result < 0 : result > 0;
+    };
+
+    layoutAboutToBeChanged();
+    std::sort(m_apps.begin(), m_apps.end(), [&](const InstalledApp &a, const InstalledApp &b) {
+        switch (column) {
+        case 0:
+            return compareString(iconForApp(a).isNull() ? QStringLiteral("1") : QStringLiteral("0"),
+                                 iconForApp(b).isNull() ? QStringLiteral("1") : QStringLiteral("0"));
+        case 1:
+            return compareString(a.displayName, b.displayName);
+        case 2:
+            return compareString(a.displayVersion, b.displayVersion);
+        case 3:
+            return compareString(a.publisher, b.publisher);
+        case 4:
+            return compareString(a.installLocation, b.installLocation);
+        case 5:
+            if (order == Qt::AscendingOrder) {
+                return a.estimatedSizeBytes < b.estimatedSizeBytes;
+            }
+            return a.estimatedSizeBytes > b.estimatedSizeBytes;
+        default:
+            return false;
+        }
+    });
+    layoutChanged();
 }
 
 QVariant AppListModel::headerData(int section, Qt::Orientation orientation, int role) const

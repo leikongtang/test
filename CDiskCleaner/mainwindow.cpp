@@ -60,7 +60,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::setupUi()
 {
-    setWindowTitle(QStringLiteral("C盘清理工具 v1.2.2"));
+    setWindowTitle(QStringLiteral("C盘清理工具 v1.2.3"));
     resize(1020, 720);
 
     m_tabWidget = new QTabWidget(this);
@@ -280,7 +280,17 @@ void MainWindow::onTabChanged(int index)
 
 void MainWindow::startLoadAppsIfNeeded()
 {
-    if (m_appsLoadFinished || m_appsLoadStarted) {
+    if (m_isUninstallLoading) {
+        return;
+    }
+
+    if (m_appsLoadFinished) {
+        return;
+    }
+
+    if (!m_installedApps.isEmpty()) {
+        m_appsLoadFinished = true;
+        rebuildFilteredApps();
         return;
     }
 
@@ -560,7 +570,7 @@ void MainWindow::onRefreshAppsClicked()
 
     if (m_uninstallWorkerThread->isRunning()) {
         m_uninstallWorkerThread->quit();
-        m_uninstallWorkerThread->wait();
+        m_uninstallWorkerThread->wait(3000);
     }
     m_uninstallWorkerThread->start();
 }
@@ -668,10 +678,21 @@ void MainWindow::onAppScanFinished(int totalCount)
 {
     setUninstallLoading(false);
     m_appsLoadFinished = true;
-    rebuildFilteredApps();
+
+    if (m_installedApps.isEmpty() && totalCount > 0) {
+        rebuildFilteredApps();
+    } else if (m_appModel->rowCount() == 0 && !m_installedApps.isEmpty()) {
+        rebuildFilteredApps();
+    }
+
     m_appTableView->setSortingEnabled(true);
-    m_uninstallStatusLabel->setText(
-        QStringLiteral("加载完成，共 %1 款软件。").arg(totalCount));
+
+    if (totalCount == 0) {
+        m_uninstallStatusLabel->setText(QStringLiteral("未发现可卸载软件，请尝试以管理员身份运行后刷新。"));
+    } else {
+        m_uninstallStatusLabel->setText(
+            QStringLiteral("加载完成，共 %1 款软件。").arg(totalCount));
+    }
 }
 
 void MainWindow::onAppUninstallFinished(bool success, const QString &message)

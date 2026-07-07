@@ -5,9 +5,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QSet>
-#include <QMutex>
-
-#include <QtConcurrent>
+#include <QtConcurrent/QtConcurrent>
 
 #include <algorithm>
 #include <functional>
@@ -171,6 +169,39 @@ QString makeAppDedupKey(const InstalledApp &app)
     return app.displayName.toLower() + QChar(0x1F) + app.displayVersion.toLower();
 }
 
+QVector<InstalledApp> mergeAndSortApps(QVector<InstalledApp> apps)
+{
+    QVector<InstalledApp> uniqueApps;
+    uniqueApps.reserve(apps.size());
+    QSet<QString> seenKeys;
+
+    for (const InstalledApp &app : apps) {
+        const QString dedupKey = makeAppDedupKey(app);
+        if (seenKeys.contains(dedupKey)) {
+            continue;
+        }
+        seenKeys.insert(dedupKey);
+        uniqueApps.append(app);
+    }
+
+    std::sort(uniqueApps.begin(), uniqueApps.end(), [](const InstalledApp &a, const InstalledApp &b) {
+        return a.displayName.compare(b.displayName, Qt::CaseInsensitive) < 0;
+    });
+
+    return uniqueApps;
+}
+
+#ifdef Q_OS_WIN
+QVector<InstalledApp> collectAppsFromRegistryRoot(HKEY rootKey, const QString &rootPath)
+{
+    QVector<InstalledApp> apps;
+    enumerateFromRegistryRootIncremental(rootKey, rootPath, true, [&apps](const InstalledApp &app) {
+        apps.append(app);
+    });
+    return apps;
+}
+#endif
+
 } // namespace
 
 InstalledApp AppUninstaller::readAppFromRegistryKey(const QString &rootPath, const QString &subKey)
@@ -204,86 +235,41 @@ InstalledApp AppUninstaller::readAppFromRegistryKey(const QString &rootPath, con
 
 QVector<InstalledApp> AppUninstaller::enumerateInstalledApps()
 {
-    QVector<InstalledApp> apps;
-    apps.reserve(512);
-
 #ifdef Q_OS_WIN
-    enumerateFromRegistryRoot(HKEY_LOCAL_MACHINE,
-                              QStringLiteral("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
-                              apps);
-    enumerateFromRegistryRoot(HKEY_LOCAL_MACHINE,
-                              QStringLiteral("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
-                              apps);
-    enumerateFromRegistryRoot(HKEY_CURRENT_USER,
-                              QStringLiteral("HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
-                              apps);
-
-    QVector<InstalledApp> uniqueApps;
-    uniqueApps.reserve(apps.size());
-    QSet<QString> seenKeys;
-
-    for (const InstalledApp &app : apps) {
-        const QString dedupKey = makeAppDedupKey(app);
-        if (seenKeys.contains(dedupKey)) {
-            continue;
-        }
-        seenKeys.insert(dedupKey);
-        uniqueApps.append(app);
-    }
-
-    std::sort(uniqueApps.begin(), uniqueApps.end(), [](const InstalledApp &a, const InstalledApp &b) {
-        return a.displayName.compare(b.displayName, Qt::CaseInsensitive) < 0;
+    QFuture<QVector<InstalledApp>> futureLocalMachine = QtConcurrent::run([]() {
+        return collectAppsFromRegistryRoot(
+            HKEY_LOCAL_MACHINE,
+            QStringLiteral("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
+    });
+    QFuture<QVector<InstalledApp>> futureWow64 = QtConcurrent::run([]() {
+        return collectAppsFromRegistryRoot(
+            HKEY_LOCAL_MACHINE,
+            QStringLiteral("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
+    });
+    QFuture<QVector<InstalledApp>> futureCurrentUser = QtConcurrent::run([]() {
+        return collectAppsFromRegistryRoot(
+            HKEY_CURRENT_USER,
+            QStringLiteral("HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
     });
 
-    return uniqueApps;
+    QVector<InstalledApp> apps;
+    apps.reserve(512);
+    apps += futureLocalMachine.result();
+    apps += futureWow64.result();
+    apps += futureCurrentUser.result();
+
+    return mergeAndSortApps(apps);
 #else
-    return apps;
+    return QVector<InstalledApp>();
 #endif
 }
 
 void AppUninstaller::enumerateInstalledAppsIncremental(const std::function<void(const InstalledApp &)> &callback)
 {
-#ifdef Q_OS_WIN
-    struct ScanContext {
-        QMutex mutex;
-        QSet<QString> seenKeys;
-        std::function<void(const InstalledApp &)> emitApp;
-    };
-
-    ScanContext context;
-    context.emitApp = callback;
-
-    const auto scanRoot = [&context](HKEY rootKey, const QString &rootPath) {
-        enumerateFromRegistryRootIncremental(rootKey, rootPath, true, [&context](const InstalledApp &app) {
-            const QString dedupKey = makeAppDedupKey(app);
-            QMutexLocker locker(&context.mutex);
-            if (context.seenKeys.contains(dedupKey)) {
-                return;
-            }
-            context.seenKeys.insert(dedupKey);
-            context.emitApp(app);
-        });
-    };
-
-    QFuture<void> futureLocalMachine = QtConcurrent::run([&]() {
-        scanRoot(HKEY_LOCAL_MACHINE,
-                 QStringLiteral("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
-    });
-    QFuture<void> futureWow64 = QtConcurrent::run([&]() {
-        scanRoot(HKEY_LOCAL_MACHINE,
-                 QStringLiteral("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
-    });
-    QFuture<void> futureCurrentUser = QtConcurrent::run([&]() {
-        scanRoot(HKEY_CURRENT_USER,
-                 QStringLiteral("HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
-    });
-
-    futureLocalMachine.waitForFinished();
-    futureWow64.waitForFinished();
-    futureCurrentUser.waitForFinished();
-#else
-    Q_UNUSED(callback)
-#endif
+    const QVector<InstalledApp> apps = enumerateInstalledApps();
+    for (const InstalledApp &app : apps) {
+        callback(app);
+    }
 }
 
 InstalledApp AppUninstaller::loadFullAppDetails(const InstalledApp &app)

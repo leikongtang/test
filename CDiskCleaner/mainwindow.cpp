@@ -6,6 +6,7 @@
 #include "cleanupscanner.h"
 #include "cleanupworker.h"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QDesktopServices>
 #include <QDir>
@@ -37,8 +38,10 @@ MainWindow::MainWindow(QWidget *parent)
     , m_appsLoadStarted(false)
     , m_appsLoadFinished(false)
     , m_totalScannedBytes(0)
+    , m_activeCleanupContext(CleanupContext::Disk)
 {
     m_categories = CleanupScanner::defaultCategories();
+    buildSoftwareCategoryIndices();
     setupUi();
     setupWorker();
     setupUninstallWorker();
@@ -64,17 +67,21 @@ MainWindow::~MainWindow()
 
 void MainWindow::setupUi()
 {
-    setWindowTitle(QStringLiteral("C盘清理工具 v1.2.4"));
+    const QString version = QApplication::applicationVersion();
+    setWindowTitle(QStringLiteral("C盘清理工具 v%1").arg(version));
     resize(1020, 720);
 
     m_tabWidget = new QTabWidget(this);
     QWidget *cleanupTab = new QWidget(this);
+    QWidget *softwareCacheTab = new QWidget(this);
     QWidget *uninstallTab = new QWidget(this);
 
     setupCleanupTab(cleanupTab);
+    setupSoftwareCacheTab(softwareCacheTab);
     setupUninstallTab(uninstallTab);
 
     m_tabWidget->addTab(cleanupTab, QStringLiteral("磁盘清理"));
+    m_tabWidget->addTab(softwareCacheTab, QStringLiteral("软件缓存"));
     m_tabWidget->addTab(uninstallTab, QStringLiteral("软件卸载"));
 
     connect(m_tabWidget, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
@@ -163,6 +170,69 @@ void MainWindow::setupCleanupTab(QWidget *tab)
     mainLayout->addLayout(toolLayout);
     mainLayout->addWidget(m_progressBar);
     mainLayout->addWidget(m_statusLabel);
+    mainLayout->addWidget(tipLabel);
+}
+
+void MainWindow::setupSoftwareCacheTab(QWidget *tab)
+{
+    QVBoxLayout *mainLayout = new QVBoxLayout(tab);
+
+    m_softwareCacheTable = new QTableWidget(m_softwareCategoryIndices.size(), 5, tab);
+    m_softwareCacheTable->setHorizontalHeaderLabels({
+        QStringLiteral("选择"),
+        QStringLiteral("软件"),
+        QStringLiteral("说明"),
+        QStringLiteral("路径"),
+        QStringLiteral("大小")
+    });
+    m_softwareCacheTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_softwareCacheTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_softwareCacheTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    m_softwareCacheTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    m_softwareCacheTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    m_softwareCacheTable->verticalHeader()->setVisible(false);
+    m_softwareCacheTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_softwareCacheTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    for (int i = 0; i < m_softwareCategoryIndices.size(); ++i) {
+        updateSoftwareCacheRow(i, m_categories.at(m_softwareCategoryIndices.at(i)));
+    }
+
+    QHBoxLayout *toolLayout = new QHBoxLayout();
+    m_softwareScanButton = new QPushButton(QStringLiteral("扫描软件缓存"), tab);
+    m_softwareCleanButton = new QPushButton(QStringLiteral("清理选中项"), tab);
+    m_softwareSelectAllButton = new QPushButton(QStringLiteral("全选"), tab);
+    m_softwareSelectNoneButton = new QPushButton(QStringLiteral("全不选"), tab);
+    m_softwareScanResultLabel = new QLabel(QStringLiteral("可清理空间: --"), tab);
+    m_softwareScanResultLabel->setStyleSheet(QStringLiteral("font-weight: bold; color: #0078d4;"));
+
+    connect(m_softwareScanButton, &QPushButton::clicked, this, &MainWindow::onSoftwareScanClicked);
+    connect(m_softwareCleanButton, &QPushButton::clicked, this, &MainWindow::onSoftwareCleanClicked);
+    connect(m_softwareSelectAllButton, &QPushButton::clicked, this, &MainWindow::onSoftwareSelectAllClicked);
+    connect(m_softwareSelectNoneButton, &QPushButton::clicked, this, &MainWindow::onSoftwareSelectNoneClicked);
+
+    toolLayout->addWidget(m_softwareScanButton);
+    toolLayout->addWidget(m_softwareCleanButton);
+    toolLayout->addWidget(m_softwareSelectAllButton);
+    toolLayout->addWidget(m_softwareSelectNoneButton);
+    toolLayout->addStretch();
+    toolLayout->addWidget(m_softwareScanResultLabel);
+
+    m_softwareProgressBar = new QProgressBar(tab);
+    m_softwareProgressBar->setRange(0, 0);
+    m_softwareProgressBar->setVisible(false);
+
+    m_softwareStatusLabel = new QLabel(
+        QStringLiteral("就绪。清理前请关闭对应软件，避免文件占用导致清理不完整。"), tab);
+
+    QLabel *tipLabel = new QLabel(
+        QStringLiteral("支持 Chrome/Edge/Firefox、微信/QQ/钉钉/企业微信/飞书、WPS、VS Code、Steam、npm/pip 等常见软件缓存。"), tab);
+    tipLabel->setStyleSheet(QStringLiteral("color: #666;"));
+
+    mainLayout->addWidget(m_softwareCacheTable, 1);
+    mainLayout->addLayout(toolLayout);
+    mainLayout->addWidget(m_softwareProgressBar);
+    mainLayout->addWidget(m_softwareStatusLabel);
     mainLayout->addWidget(tipLabel);
 }
 
@@ -270,9 +340,15 @@ void MainWindow::setUiBusy(bool busy)
     m_cleanButton->setEnabled(!busy);
     m_selectAllButton->setEnabled(!busy);
     m_selectNoneButton->setEnabled(!busy);
+    m_softwareScanButton->setEnabled(!busy);
+    m_softwareCleanButton->setEnabled(!busy);
+    m_softwareSelectAllButton->setEnabled(!busy);
+    m_softwareSelectNoneButton->setEnabled(!busy);
     m_refreshDiskButton->setEnabled(!busy);
     m_categoryTable->setEnabled(!busy);
-    m_progressBar->setVisible(busy);
+    m_softwareCacheTable->setEnabled(!busy);
+    m_progressBar->setVisible(busy && m_activeCleanupContext == CleanupContext::Disk);
+    m_softwareProgressBar->setVisible(busy && m_activeCleanupContext == CleanupContext::Software);
 }
 
 void MainWindow::setUninstallLoading(bool loading)
@@ -286,8 +362,18 @@ void MainWindow::setUninstallLoading(bool loading)
 
 void MainWindow::onTabChanged(int index)
 {
-    if (index == 1) {
+    if (index == 2) {
         startLoadAppsIfNeeded();
+    }
+}
+
+void MainWindow::buildSoftwareCategoryIndices()
+{
+    m_softwareCategoryIndices.clear();
+    for (int i = 0; i < m_categories.size(); ++i) {
+        if (m_categories.at(i).group == QStringLiteral("软件")) {
+            m_softwareCategoryIndices.append(i);
+        }
     }
 }
 
@@ -389,6 +475,54 @@ void MainWindow::updateCategoryRow(int row, const CleanupCategory &category)
     m_categoryTable->setItem(row, 5, new QTableWidgetItem(sizeText));
 }
 
+void MainWindow::updateSoftwareCacheRow(int tableRow, const CleanupCategory &category)
+{
+    if (tableRow < 0 || tableRow >= m_softwareCacheTable->rowCount()) {
+        return;
+    }
+
+    QCheckBox *checkBox = qobject_cast<QCheckBox *>(m_softwareCacheTable->cellWidget(tableRow, 0));
+    if (!checkBox) {
+        checkBox = new QCheckBox(this);
+        checkBox->setChecked(category.selected);
+        m_softwareCacheTable->setCellWidget(tableRow, 0, checkBox);
+    } else {
+        checkBox->setChecked(category.selected);
+    }
+
+    m_softwareCacheTable->setItem(tableRow, 1, new QTableWidgetItem(category.name));
+    m_softwareCacheTable->setItem(tableRow, 2, new QTableWidgetItem(category.description));
+
+    QString pathText;
+    const QStringList pathList = category.effectivePaths();
+    if (pathList.isEmpty()) {
+        pathText = QStringLiteral("未检测到（可能未安装）");
+    } else if (pathList.size() == 1) {
+        pathText = pathList.first();
+    } else {
+        pathText = QStringLiteral("%1 等 %2 个目录").arg(pathList.first()).arg(pathList.size());
+    }
+    m_softwareCacheTable->setItem(tableRow, 3, new QTableWidgetItem(pathText));
+
+    const QString sizeText = category.scanned
+                                 ? CleanupScanner::formatSize(category.sizeBytes)
+                                 : QStringLiteral("--");
+    m_softwareCacheTable->setItem(tableRow, 4, new QTableWidgetItem(sizeText));
+}
+
+void MainWindow::updateCategoryViews(int categoryIndex, const CleanupCategory &category)
+{
+    if (categoryIndex >= 0 && categoryIndex < m_categories.size()) {
+        m_categories[categoryIndex] = category;
+        updateCategoryRow(categoryIndex, category);
+
+        const int softwareRow = m_softwareCategoryIndices.indexOf(categoryIndex);
+        if (softwareRow >= 0) {
+            updateSoftwareCacheRow(softwareRow, category);
+        }
+    }
+}
+
 void MainWindow::updateSummary()
 {
     qint64 selectedTotal = 0;
@@ -408,6 +542,26 @@ void MainWindow::updateSummary()
     }
 }
 
+void MainWindow::updateSoftwareSummary()
+{
+    qint64 selectedTotal = 0;
+    for (int i = 0; i < m_softwareCategoryIndices.size(); ++i) {
+        const int categoryIndex = m_softwareCategoryIndices.at(i);
+        QCheckBox *checkBox = qobject_cast<QCheckBox *>(m_softwareCacheTable->cellWidget(i, 0));
+        const bool selected = checkBox ? checkBox->isChecked() : m_categories.at(categoryIndex).selected;
+        if (selected && m_categories.at(categoryIndex).scanned) {
+            selectedTotal += m_categories.at(categoryIndex).sizeBytes;
+        }
+    }
+
+    if (selectedTotal > 0) {
+        m_softwareScanResultLabel->setText(
+            QStringLiteral("可清理空间: %1").arg(CleanupScanner::formatSize(selectedTotal)));
+    } else {
+        m_softwareScanResultLabel->setText(QStringLiteral("可清理空间: --"));
+    }
+}
+
 QVector<CleanupCategory> MainWindow::collectSelectedCategories() const
 {
     QVector<CleanupCategory> result;
@@ -416,6 +570,35 @@ QVector<CleanupCategory> MainWindow::collectSelectedCategories() const
         QCheckBox *checkBox = qobject_cast<QCheckBox *>(m_categoryTable->cellWidget(i, 0));
         category.selected = checkBox ? checkBox->isChecked() : category.selected;
         result.append(category);
+    }
+    return result;
+}
+
+void MainWindow::syncSoftwareSelectionToDiskTable()
+{
+    for (int i = 0; i < m_softwareCategoryIndices.size(); ++i) {
+        const int categoryIndex = m_softwareCategoryIndices.at(i);
+        QCheckBox *softwareCheckBox = qobject_cast<QCheckBox *>(m_softwareCacheTable->cellWidget(i, 0));
+        QCheckBox *diskCheckBox = qobject_cast<QCheckBox *>(m_categoryTable->cellWidget(categoryIndex, 0));
+        if (softwareCheckBox && diskCheckBox) {
+            diskCheckBox->setChecked(softwareCheckBox->isChecked());
+        }
+    }
+}
+
+QVector<CleanupCategory> MainWindow::collectSoftwareCategoriesForWorker() const
+{
+    QVector<CleanupCategory> result = m_categories;
+    for (int i = 0; i < result.size(); ++i) {
+        if (result.at(i).group == QStringLiteral("软件")) {
+            const int softwareRow = m_softwareCategoryIndices.indexOf(i);
+            QCheckBox *checkBox = softwareRow >= 0
+                                       ? qobject_cast<QCheckBox *>(m_softwareCacheTable->cellWidget(softwareRow, 0))
+                                       : nullptr;
+            result[i].selected = checkBox ? checkBox->isChecked() : false;
+        } else {
+            result[i].selected = false;
+        }
     }
     return result;
 }
@@ -442,6 +625,7 @@ void MainWindow::onScanClicked()
         return;
     }
 
+    m_activeCleanupContext = CleanupContext::Disk;
     m_totalScannedBytes = 0;
     for (CleanupCategory &category : m_categories) {
         category.scanned = false;
@@ -500,6 +684,7 @@ void MainWindow::onCleanClicked()
         return;
     }
 
+    m_activeCleanupContext = CleanupContext::Disk;
     m_worker->setCategories(selected);
     m_worker->setMode(CleanupWorker::Mode::Clean);
     setUiBusy(true);
@@ -534,24 +719,145 @@ void MainWindow::onSelectNoneClicked()
     updateSummary();
 }
 
-void MainWindow::onCategoryProgress(int index, const CleanupCategory &category)
+void MainWindow::onSoftwareScanClicked()
 {
-    if (index >= 0 && index < m_categories.size()) {
-        m_categories[index] = category;
-        updateCategoryRow(index, category);
-        if (category.scanned) {
-            m_totalScannedBytes += category.sizeBytes;
+    if (m_isBusy) {
+        return;
+    }
+
+    m_activeCleanupContext = CleanupContext::Software;
+    m_totalScannedBytes = 0;
+    for (CleanupCategory &category : m_categories) {
+        if (category.group == QStringLiteral("软件")) {
+            category.scanned = false;
+            category.sizeBytes = 0;
         }
     }
+    for (int i = 0; i < m_softwareCategoryIndices.size(); ++i) {
+        updateSoftwareCacheRow(i, m_categories.at(m_softwareCategoryIndices.at(i)));
+    }
+
+    const QVector<CleanupCategory> payload = collectSoftwareCategoriesForWorker();
+    m_worker->setCategories(payload);
+    m_worker->setMode(CleanupWorker::Mode::Scan);
+    setUiBusy(true);
+    m_softwareStatusLabel->setText(QStringLiteral("正在扫描软件缓存，请稍候..."));
+
+    if (m_workerThread->isRunning()) {
+        m_workerThread->quit();
+        m_workerThread->wait();
+    }
+    m_workerThread->start();
+}
+
+void MainWindow::onSoftwareCleanClicked()
+{
+    if (m_isBusy) {
+        return;
+    }
+
+    const QVector<CleanupCategory> payload = collectSoftwareCategoriesForWorker();
+    qint64 selectedSize = 0;
+    int selectedCount = 0;
+    for (const CleanupCategory &category : payload) {
+        if (!category.selected) {
+            continue;
+        }
+        ++selectedCount;
+        if (category.scanned) {
+            selectedSize += category.sizeBytes;
+        }
+    }
+
+    if (selectedCount == 0) {
+        QMessageBox::warning(this, QStringLiteral("提示"), QStringLiteral("请至少选择一项软件缓存。"));
+        return;
+    }
+
+    const QString sizeHint = selectedSize > 0
+                                 ? CleanupScanner::formatSize(selectedSize)
+                                 : QStringLiteral("未知（建议先扫描）");
+
+    const QMessageBox::StandardButton reply = QMessageBox::question(
+        this,
+        QStringLiteral("确认清理"),
+        QStringLiteral("确定要清理选中的 %1 项软件缓存吗？\n预计释放空间: %2\n\n清理前请关闭相关软件，此操作不可撤销。")
+            .arg(selectedCount)
+            .arg(sizeHint));
+
+    if (reply != QMessageBox::Yes) {
+        return;
+    }
+
+    m_activeCleanupContext = CleanupContext::Software;
+    m_worker->setCategories(payload);
+    m_worker->setMode(CleanupWorker::Mode::Clean);
+    setUiBusy(true);
+    m_softwareStatusLabel->setText(QStringLiteral("正在清理软件缓存，请稍候..."));
+
+    if (m_workerThread->isRunning()) {
+        m_workerThread->quit();
+        m_workerThread->wait();
+    }
+    m_workerThread->start();
+}
+
+void MainWindow::onSoftwareSelectAllClicked()
+{
+    for (int i = 0; i < m_softwareCacheTable->rowCount(); ++i) {
+        QCheckBox *checkBox = qobject_cast<QCheckBox *>(m_softwareCacheTable->cellWidget(i, 0));
+        if (checkBox) {
+            checkBox->setChecked(true);
+        }
+    }
+    syncSoftwareSelectionToDiskTable();
+    updateSoftwareSummary();
+}
+
+void MainWindow::onSoftwareSelectNoneClicked()
+{
+    for (int i = 0; i < m_softwareCacheTable->rowCount(); ++i) {
+        QCheckBox *checkBox = qobject_cast<QCheckBox *>(m_softwareCacheTable->cellWidget(i, 0));
+        if (checkBox) {
+            checkBox->setChecked(false);
+        }
+    }
+    syncSoftwareSelectionToDiskTable();
+    updateSoftwareSummary();
+}
+
+void MainWindow::onCategoryProgress(int index, const CleanupCategory &category)
+{
+    updateCategoryViews(index, category);
+    if (category.scanned) {
+        m_totalScannedBytes += category.sizeBytes;
+    }
     updateSummary();
+    updateSoftwareSummary();
+
+    if (m_activeCleanupContext == CleanupContext::Software) {
+        m_softwareStatusLabel->setText(
+            QStringLiteral("正在处理: %1 (%2)")
+                .arg(category.name, CleanupScanner::formatSize(category.sizeBytes)));
+    } else {
+        m_statusLabel->setText(
+            QStringLiteral("正在处理: %1 (%2)")
+                .arg(category.name, CleanupScanner::formatSize(category.sizeBytes)));
+    }
 }
 
 void MainWindow::onWorkerFinished(bool success, qint64 /*totalBytes*/, const QString &message)
 {
     setUiBusy(false);
-    m_statusLabel->setText(message);
+    if (m_activeCleanupContext == CleanupContext::Software) {
+        m_softwareStatusLabel->setText(message);
+        syncSoftwareSelectionToDiskTable();
+    } else {
+        m_statusLabel->setText(message);
+    }
     refreshDiskInfo();
     updateSummary();
+    updateSoftwareSummary();
 
     if (success) {
         QMessageBox::information(this, QStringLiteral("完成"), message);
@@ -562,7 +868,11 @@ void MainWindow::onWorkerFinished(bool success, qint64 /*totalBytes*/, const QSt
 
 void MainWindow::onWorkerError(const QString &message)
 {
-    m_statusLabel->setText(message);
+    if (m_activeCleanupContext == CleanupContext::Software) {
+        m_softwareStatusLabel->setText(message);
+    } else {
+        m_statusLabel->setText(message);
+    }
 }
 
 void MainWindow::onRefreshAppsClicked()

@@ -25,6 +25,8 @@ private:
                                         bool selected);
     static QStringList discoverFirefoxCachePaths();
     static QStringList discoverWpsCachePaths();
+    static QStringList discoverChromiumCachePaths(const QString &userDataRoot);
+    static QStringList existingPaths(const QStringList &paths);
     static bool cleanDirectoryContents(const QString &path, bool *cancelled);
 };
 

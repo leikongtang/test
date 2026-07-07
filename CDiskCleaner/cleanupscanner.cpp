@@ -61,6 +61,52 @@ QStringList CleanupScanner::discoverFirefoxCachePaths()
     return result;
 }
 
+QStringList CleanupScanner::discoverChromiumCachePaths(const QString &userDataRoot)
+{
+    QStringList result;
+    const QDir userDataDir(userDataRoot);
+    if (!userDataDir.exists()) {
+        return result;
+    }
+
+    const QStringList subPaths = {
+        QStringLiteral("Cache"),
+        QStringLiteral("Code Cache"),
+        QStringLiteral("GPUCache"),
+        QStringLiteral("Service Worker/CacheStorage")
+    };
+
+    const auto appendProfilePaths = [&](const QString &profilePath) {
+        for (const QString &subPath : subPaths) {
+            const QString fullPath = profilePath + QLatin1Char('/') + subPath;
+            if (QDir(fullPath).exists()) {
+                result.append(QDir::fromNativeSeparators(fullPath));
+            }
+        }
+    };
+
+    appendProfilePaths(userDataRoot + QStringLiteral("/Default"));
+
+    const QFileInfoList profiles = userDataDir.entryInfoList(
+        QStringList{QStringLiteral("Profile *")}, QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo &profile : profiles) {
+        appendProfilePaths(profile.absoluteFilePath());
+    }
+
+    return result;
+}
+
+QStringList CleanupScanner::existingPaths(const QStringList &paths)
+{
+    QStringList result;
+    for (const QString &path : paths) {
+        if (!path.isEmpty() && QDir(path).exists()) {
+            result.append(path);
+        }
+    }
+    return result;
+}
+
 QStringList CleanupScanner::discoverWpsCachePaths()
 {
     QStringList result;
@@ -166,13 +212,8 @@ QVector<CleanupCategory> CleanupScanner::defaultCategories()
         CleanupCategory::Id::ChromeCache,
         QStringLiteral("软件"),
         QStringLiteral("Chrome 浏览器缓存"),
-        QStringLiteral("Google Chrome 网页缓存、代码缓存与 GPU 缓存"),
-        {
-            localAppData + QStringLiteral("/Google/Chrome/User Data/Default/Cache"),
-            localAppData + QStringLiteral("/Google/Chrome/User Data/Default/Code Cache"),
-            localAppData + QStringLiteral("/Google/Chrome/User Data/Default/GPUCache"),
-            localAppData + QStringLiteral("/Google/Chrome/User Data/Default/Service Worker/CacheStorage")
-        },
+        QStringLiteral("Google Chrome 各配置文件的网页、代码与 GPU 缓存"),
+        discoverChromiumCachePaths(localAppData + QStringLiteral("/Google/Chrome/User Data")),
         false,
         true));
 
@@ -180,13 +221,8 @@ QVector<CleanupCategory> CleanupScanner::defaultCategories()
         CleanupCategory::Id::EdgeCache,
         QStringLiteral("软件"),
         QStringLiteral("Edge 浏览器缓存"),
-        QStringLiteral("Microsoft Edge 网页缓存、代码缓存与 GPU 缓存"),
-        {
-            localAppData + QStringLiteral("/Microsoft/Edge/User Data/Default/Cache"),
-            localAppData + QStringLiteral("/Microsoft/Edge/User Data/Default/Code Cache"),
-            localAppData + QStringLiteral("/Microsoft/Edge/User Data/Default/GPUCache"),
-            localAppData + QStringLiteral("/Microsoft/Edge/User Data/Default/Service Worker/CacheStorage")
-        },
+        QStringLiteral("Microsoft Edge 各配置文件的网页、代码与 GPU 缓存"),
+        discoverChromiumCachePaths(localAppData + QStringLiteral("/Microsoft/Edge/User Data")),
         false,
         true));
 
@@ -246,6 +282,166 @@ QVector<CleanupCategory> CleanupScanner::defaultCategories()
         QStringLiteral("WPS Office 缓存"),
         QStringLiteral("WPS 本地缓存与备份缓存目录"),
         discoverWpsCachePaths(),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::WxWorkCache,
+        QStringLiteral("软件"),
+        QStringLiteral("企业微信缓存"),
+        QStringLiteral("企业微信日志、临时文件与本地缓存"),
+        existingPaths({
+            appData + QStringLiteral("/Tencent/WXWork/Log"),
+            appData + QStringLiteral("/Tencent/WXWork/cache"),
+            localAppData + QStringLiteral("/Tencent/WXWork/Temp"),
+            localAppData + QStringLiteral("/Tencent/WXWork/Cache")
+        }),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::FeishuCache,
+        QStringLiteral("软件"),
+        QStringLiteral("飞书缓存"),
+        QStringLiteral("飞书日志与本地缓存"),
+        existingPaths({
+            appData + QStringLiteral("/Feishu/log"),
+            appData + QStringLiteral("/Feishu/cache"),
+            localAppData + QStringLiteral("/Feishu/cache"),
+            localAppData + QStringLiteral("/Lark/cache"),
+            appData + QStringLiteral("/Lark/log")
+        }),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::Browser360Cache,
+        QStringLiteral("软件"),
+        QStringLiteral("360 浏览器缓存"),
+        QStringLiteral("360 安全/极速浏览器缓存目录"),
+        existingPaths({
+            localAppData + QStringLiteral("/360Chrome/Chrome/User Data/Default/Cache"),
+            localAppData + QStringLiteral("/360se6/User Data/Default/Cache"),
+            appData + QStringLiteral("/360se6/cache")
+        }),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::XunleiCache,
+        QStringLiteral("软件"),
+        QStringLiteral("迅雷缓存"),
+        QStringLiteral("迅雷下载临时文件与日志"),
+        existingPaths({
+            appData + QStringLiteral("/Thunder Network/Thunder/log"),
+            localAppData + QStringLiteral("/Thunder Network/Thunder/log"),
+            localAppData + QStringLiteral("/Temp/Thunder Network"),
+            appData + QStringLiteral("/Thunder Network/Xunlei/log")
+        }),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::BaiduNetdiskCache,
+        QStringLiteral("软件"),
+        QStringLiteral("百度网盘缓存"),
+        QStringLiteral("百度网盘本地缓存与临时文件"),
+        existingPaths({
+            appData + QStringLiteral("/Baidu/BaiduNetdisk/cache"),
+            localAppData + QStringLiteral("/Baidu/BaiduNetdisk/cache"),
+            localAppData + QStringLiteral("/Baidu/BaiduNetdisk/AutoUpdate/download")
+        }),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::VsCodeCache,
+        QStringLiteral("软件"),
+        QStringLiteral("VS Code 缓存"),
+        QStringLiteral("Visual Studio Code 缓存、扩展缓存与日志"),
+        existingPaths({
+            appData + QStringLiteral("/Code/Cache"),
+            appData + QStringLiteral("/Code/CachedData"),
+            appData + QStringLiteral("/Code/logs"),
+            appData + QStringLiteral("/Code/CachedExtensions")
+        }),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::SteamCache,
+        QStringLiteral("软件"),
+        QStringLiteral("Steam 缓存"),
+        QStringLiteral("Steam 网页缓存、日志与下载临时文件"),
+        existingPaths({
+            localAppData + QStringLiteral("/Steam/htmlcache"),
+            localAppData + QStringLiteral("/Steam/logs"),
+            localAppData + QStringLiteral("/Steam/appcache")
+        }),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::DouyinCache,
+        QStringLiteral("软件"),
+        QStringLiteral("抖音缓存"),
+        QStringLiteral("抖音客户端本地缓存与日志"),
+        existingPaths({
+            localAppData + QStringLiteral("/Douyin/cache"),
+            localAppData + QStringLiteral("/Douyin/log"),
+            appData + QStringLiteral("/douyin/cache"),
+            localAppData + QStringLiteral("/ByteDance/Douyin/cache")
+        }),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::SogouCache,
+        QStringLiteral("软件"),
+        QStringLiteral("搜狗输入法缓存"),
+        QStringLiteral("搜狗输入法临时文件与日志"),
+        existingPaths({
+            localAppData + QStringLiteral("/SogouPY/Temp"),
+            appData + QStringLiteral("/SogouPY/LOG"),
+            localAppData + QStringLiteral("/SogouInput/Temp")
+        }),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::NpmCache,
+        QStringLiteral("软件"),
+        QStringLiteral("npm 缓存"),
+        QStringLiteral("Node.js npm 全局包下载缓存"),
+        existingPaths({
+            appData + QStringLiteral("/npm-cache"),
+            localAppData + QStringLiteral("/npm-cache")
+        }),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::PipCache,
+        QStringLiteral("软件"),
+        QStringLiteral("pip 缓存"),
+        QStringLiteral("Python pip 包下载缓存"),
+        existingPaths({
+            localAppData + QStringLiteral("/pip/cache"),
+            appData + QStringLiteral("/pip/cache")
+        }),
+        false,
+        true));
+
+    categories.append(makeCategory(
+        CleanupCategory::Id::TencentMeetingCache,
+        QStringLiteral("软件"),
+        QStringLiteral("腾讯会议缓存"),
+        QStringLiteral("腾讯会议日志与本地缓存"),
+        existingPaths({
+            appData + QStringLiteral("/Tencent/WeMeet/log"),
+            localAppData + QStringLiteral("/Tencent/WeMeet/cache"),
+            appData + QStringLiteral("/Tencent/WeMeet/Global/Logs")
+        }),
         false,
         true));
 

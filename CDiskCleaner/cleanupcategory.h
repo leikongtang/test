@@ -20,7 +20,19 @@ struct CleanupCategory
         WeChatCache,
         QQCache,
         DingTalkCache,
-        WpsCache
+        WpsCache,
+        WxWorkCache,
+        FeishuCache,
+        Browser360Cache,
+        XunleiCache,
+        BaiduNetdiskCache,
+        VsCodeCache,
+        SteamCache,
+        DouyinCache,
+        SogouCache,
+        NpmCache,
+        PipCache,
+        TencentMeetingCache
     };
 
     Id id;

@@ -20,6 +20,8 @@
   - `mainwindow.cpp/h` - 主界面与信号控制
   - `main.cpp` - 程序入口
 - 可执行文件：`SensorSimulator/build-release/release/SensorSimulator.exe`
+- 修复 Qt 平台插件缺失：手动执行 windeployqt 部署 `platforms/qwindows.dll` 及 Qt5*.dll
+- 新增 `SensorSimulator/deploy.bat` 便于 release 后一键部署
 
 ## 未完成事项
 - 无

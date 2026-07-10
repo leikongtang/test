@@ -175,12 +175,29 @@ void MainWindow::setConnected(bool connected)
     } else {
         m_pollTimer->stop();
         m_statusLabel->setText(QStringLiteral("状态：未连接"));
-        m_statusLabel->setStyleSheet(QStringLiteral("color: #dc2626; font-weight: bold;"));
+        m_statusLabel->setStyleSheet(QStringLiteral("color: #64748b; font-weight: bold;"));
         m_inputPanel->setAllStates(0);
         m_outputPanel->setAllStates(0);
         m_lastInputState = 0;
         m_lastOutputState = 0;
     }
+}
+
+void MainWindow::showConnectFailed(const QString &ip, int errorCode)
+{
+    setConnected(false);
+    m_statusLabel->setText(QStringLiteral("状态：连接失败（%1）").arg(ip));
+    m_statusLabel->setStyleSheet(QStringLiteral("color: #dc2626; font-weight: bold;"));
+
+    appendLog(QStringLiteral("连接失败：无法连接到 %1，%2").arg(ip, errorText(errorCode)));
+    QMessageBox::critical(this,
+                          QStringLiteral("连接失败"),
+                          QStringLiteral("连接失败，无法连接到 IO 板 %1。\n\n请检查：\n"
+                                         "1. IP 地址是否正确\n"
+                                         "2. 网线是否已连接\n"
+                                         "3. PC 与 IO 板是否在同一网段\n\n"
+                                         "%2")
+                              .arg(ip, errorText(errorCode)));
 }
 
 void MainWindow::appendLog(const QString &message)
@@ -200,7 +217,12 @@ void MainWindow::onConnectClicked()
 {
     const QString ip = m_ipEdit->text().trimmed();
     if (ip.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("连接失败"), QStringLiteral("请输入 IO 板 IP 地址。"));
+        m_statusLabel->setText(QStringLiteral("状态：连接失败"));
+        m_statusLabel->setStyleSheet(QStringLiteral("color: #dc2626; font-weight: bold;"));
+        appendLog(QStringLiteral("连接失败：未输入 IO 板 IP 地址"));
+        QMessageBox::critical(this,
+                              QStringLiteral("连接失败"),
+                              QStringLiteral("连接失败，请输入 IO 板 IP 地址。"));
         return;
     }
 
@@ -213,11 +235,7 @@ void MainWindow::onConnectClicked()
     const int rc = ZAux_OpenEth(ipBytes.data(), &m_handle);
     if (rc != ERR_OK) {
         m_handle = nullptr;
-        appendLog(QStringLiteral("连接失败：%1，%2").arg(ip, errorText(rc)));
-        QMessageBox::warning(this,
-                             QStringLiteral("连接失败"),
-                             QStringLiteral("无法连接到 %1\n%2").arg(ip, errorText(rc)));
-        setConnected(false);
+        showConnectFailed(ip, rc);
         return;
     }
 

@@ -38,6 +38,7 @@ private:
     void loadSettings();
     void saveSettings();
     void setConnected(bool connected);
+    void showConnectFailed(const QString &ip, int errorCode);
     void appendLog(const QString &message);
     QString errorText(int errorCode) const;
     bool pollIoStates();

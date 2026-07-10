@@ -6,4 +6,5 @@ EXPORTS
     ZAux_Direct_GetOp
     ZAux_Direct_GetOutMulti
     ZAux_Direct_SetOp
+    ZAux_Direct_SetOutMulti
     ZAux_GetModbusIn

@@ -25,6 +25,7 @@ int32_t ZMCAUX_API ZAux_Direct_GetInMulti(ZMC_HANDLE handle, int ionumfirst, int
 int32_t ZMCAUX_API ZAux_Direct_GetOp(ZMC_HANDLE handle, int ionum, uint32_t *piValue);
 int32_t ZMCAUX_API ZAux_Direct_GetOutMulti(ZMC_HANDLE handle, int ionumfirst, int ionumend, uint32_t *piValue);
 int32_t ZMCAUX_API ZAux_Direct_SetOp(ZMC_HANDLE handle, int ionum, int iValue);
+int32_t ZMCAUX_API ZAux_Direct_SetOutMulti(ZMC_HANDLE handle, int ionumfirst, int ionumend, int32_t iValue);
 int32_t ZMCAUX_API ZAux_GetModbusIn(ZMC_HANDLE handle, int ionumfirst, int ionumend, uint8_t *pValueList);
 
 #ifdef __cplusplus

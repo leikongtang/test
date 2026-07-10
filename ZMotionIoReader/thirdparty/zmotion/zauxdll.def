@@ -1,0 +1,9 @@
+EXPORTS
+    ZAux_OpenEth
+    ZAux_Close
+    ZAux_Direct_GetIn
+    ZAux_Direct_GetInMulti
+    ZAux_Direct_GetOp
+    ZAux_Direct_GetOutMulti
+    ZAux_Direct_SetOp
+    ZAux_GetModbusIn

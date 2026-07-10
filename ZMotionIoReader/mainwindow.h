@@ -2,8 +2,10 @@
 #define MAINWINDOW_H
 
 #include "signalconverter.h"
+#include "zmotionconnector.h"
 #include "zmcaux.h"
 
+#include <QFutureWatcher>
 #include <QMainWindow>
 #include <QTimer>
 
@@ -36,12 +38,14 @@ private slots:
     void onIoCountChanged(int value);
     void onConversionModeChanged(int index);
     void onAutoOutputToggled(bool enabled);
+    void onConnectFinished();
 
 private:
     void setupUi();
     void loadSettings();
     void saveSettings();
     void setConnected(bool connected);
+    void setConnecting(bool connecting, const QString &ip = QString());
     void showConnectFailed(const QString &ip, int errorCode);
     void updateConversionUi();
     void appendLog(const QString &message);
@@ -49,9 +53,11 @@ private:
     bool pollIoStates();
     bool writeOutputState(uint32_t outputMask);
     uint32_t applyConversion(uint32_t inputMask) const;
+    void waitConnectFinished();
 
     ZMC_HANDLE m_handle;
     QTimer *m_pollTimer;
+    QFutureWatcher<ZMotionConnectResult> *m_connectWatcher;
 
     QLineEdit *m_ipEdit;
     QSpinBox *m_ioCountSpin;
@@ -69,6 +75,10 @@ private:
     QComboBox *m_modeCombo;
     QSpinBox *m_offsetSpin;
     QLabel *m_conversionDescLabel;
+
+    QString m_pendingIp;
+    bool m_connecting;
+    bool m_ignoreConnectResult;
 
     int m_ioCount;
     ConversionMode m_conversionMode;

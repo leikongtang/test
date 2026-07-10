@@ -18,6 +18,7 @@
 #include <QSpinBox>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QtConcurrent>
 
 namespace {
 const char kSettingsOrg[] = "LktCodes";
@@ -34,6 +35,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_handle(nullptr)
     , m_pollTimer(new QTimer(this))
+    , m_connectWatcher(new QFutureWatcher<ZMotionConnectResult>(this))
     , m_ipEdit(nullptr)
     , m_ioCountSpin(nullptr)
     , m_refreshSpin(nullptr)
@@ -49,6 +51,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_modeCombo(nullptr)
     , m_offsetSpin(nullptr)
     , m_conversionDescLabel(nullptr)
+    , m_connecting(false)
+    , m_ignoreConnectResult(false)
     , m_ioCount(32)
     , m_conversionMode(ConversionMode::Direct)
     , m_offset(0)
@@ -61,6 +65,8 @@ MainWindow::MainWindow(QWidget *parent)
     updateConversionUi();
 
     connect(m_pollTimer, &QTimer::timeout, this, &MainWindow::onPollTimeout);
+    connect(m_connectWatcher, &QFutureWatcher<ZMotionConnectResult>::finished,
+            this, &MainWindow::onConnectFinished);
     m_pollTimer->setInterval(m_refreshSpin->value());
     setConnected(false);
 
@@ -69,6 +75,7 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    waitConnectFinished();
     if (m_handle) {
         ZAux_Close(m_handle);
         m_handle = nullptr;
@@ -218,6 +225,7 @@ void MainWindow::saveSettings()
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     saveSettings();
+    waitConnectFinished();
     if (m_handle) {
         ZAux_Close(m_handle);
         m_handle = nullptr;
@@ -225,13 +233,51 @@ void MainWindow::closeEvent(QCloseEvent *event)
     QMainWindow::closeEvent(event);
 }
 
+void MainWindow::waitConnectFinished()
+{
+    if (m_connectWatcher->isRunning()) {
+        m_connectWatcher->waitForFinished();
+    }
+}
+
+void MainWindow::setConnecting(bool connecting, const QString &ip)
+{
+    m_connecting = connecting;
+    m_connectButton->setEnabled(!connecting);
+    m_refreshButton->setEnabled(!connecting && m_handle != nullptr);
+    m_ipEdit->setEnabled(!connecting && m_handle == nullptr);
+    m_ioCountSpin->setEnabled(!connecting && m_handle == nullptr);
+    m_modeCombo->setEnabled(!connecting);
+    m_offsetSpin->setEnabled(!connecting && m_conversionMode == ConversionMode::Offset);
+    m_autoOutputCheck->setEnabled(!connecting);
+
+    if (connecting) {
+        m_disconnectButton->setEnabled(true);
+        m_disconnectButton->setText(QStringLiteral("取消连接"));
+        m_connectButton->setText(QStringLiteral("连接中..."));
+        m_statusLabel->setText(QStringLiteral("状态：正在连接 %1 ...").arg(ip));
+        m_statusLabel->setStyleSheet(QStringLiteral("color: #d97706; font-weight: bold;"));
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+    } else {
+        m_disconnectButton->setText(QStringLiteral("断开"));
+        m_connectButton->setText(QStringLiteral("连接"));
+        QApplication::restoreOverrideCursor();
+    }
+}
+
 void MainWindow::setConnected(bool connected)
 {
     m_connectButton->setEnabled(!connected);
     m_disconnectButton->setEnabled(connected);
+    m_disconnectButton->setText(QStringLiteral("断开"));
+    m_connectButton->setText(QStringLiteral("连接"));
     m_refreshButton->setEnabled(connected);
     m_ipEdit->setEnabled(!connected);
     m_ioCountSpin->setEnabled(!connected);
+    m_modeCombo->setEnabled(true);
+    m_offsetSpin->setEnabled(m_conversionMode == ConversionMode::Offset);
+    m_autoOutputCheck->setEnabled(true);
+    m_connecting = false;
 
     if (connected) {
         m_statusLabel->setText(QStringLiteral("状态：已连接 %1").arg(m_ipEdit->text().trimmed()));
@@ -339,17 +385,38 @@ void MainWindow::onConnectClicked()
         m_handle = nullptr;
     }
 
-    QByteArray ipBytes = ip.toLocal8Bit();
-    const int rc = ZAux_OpenEth(ipBytes.data(), &m_handle);
-    if (rc != ERR_OK) {
-        m_handle = nullptr;
-        showConnectFailed(ip, rc);
+    m_ignoreConnectResult = false;
+    m_pendingIp = ip;
+    setConnecting(true, ip);
+    appendLog(QStringLiteral("正在连接 %1 ...").arg(ip));
+
+    m_connectWatcher->setFuture(QtConcurrent::run(zmotionConnectEth, ip));
+}
+
+void MainWindow::onConnectFinished()
+{
+    const ZMotionConnectResult result = m_connectWatcher->result();
+    setConnecting(false);
+
+    if (m_ignoreConnectResult) {
+        if (result.handle) {
+            ZAux_Close(result.handle);
+        }
+        appendLog(QStringLiteral("连接已取消"));
+        m_statusLabel->setText(QStringLiteral("状态：未连接"));
+        m_statusLabel->setStyleSheet(QStringLiteral("color: #64748b; font-weight: bold;"));
         return;
     }
 
+    if (result.errorCode != ERR_OK) {
+        showConnectFailed(m_pendingIp, result.errorCode);
+        return;
+    }
+
+    m_handle = result.handle;
     m_ioCount = m_ioCountSpin->value();
     appendLog(QStringLiteral("已连接到 %1，IO 通道数 %2，转换模式：%3")
-                  .arg(ip)
+                  .arg(m_pendingIp)
                   .arg(m_ioCount)
                   .arg(SignalConverter::modeName(m_conversionMode)));
     setConnected(true);
@@ -358,6 +425,12 @@ void MainWindow::onConnectClicked()
 
 void MainWindow::onDisconnectClicked()
 {
+    if (m_connecting) {
+        m_ignoreConnectResult = true;
+        appendLog(QStringLiteral("正在取消连接..."));
+        return;
+    }
+
     if (m_handle) {
         ZAux_Close(m_handle);
         m_handle = nullptr;

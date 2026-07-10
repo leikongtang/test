@@ -53,6 +53,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_conversionDescLabel(nullptr)
     , m_connecting(false)
     , m_ignoreConnectResult(false)
+    , m_connectCancelled(0)
+    , m_connectToken(0)
     , m_ioCount(32)
     , m_conversionMode(ConversionMode::Direct)
     , m_offset(0)
@@ -257,12 +259,31 @@ void MainWindow::setConnecting(bool connecting, const QString &ip)
         m_connectButton->setText(QStringLiteral("连接中..."));
         m_statusLabel->setText(QStringLiteral("状态：正在连接 %1 ...").arg(ip));
         m_statusLabel->setStyleSheet(QStringLiteral("color: #d97706; font-weight: bold;"));
-        QApplication::setOverrideCursor(Qt::WaitCursor);
     } else {
         m_disconnectButton->setText(QStringLiteral("断开"));
         m_connectButton->setText(QStringLiteral("连接"));
-        QApplication::restoreOverrideCursor();
     }
+}
+
+void MainWindow::cancelConnectingUi()
+{
+    m_ignoreConnectResult = true;
+    m_connecting = false;
+
+    m_connectButton->setEnabled(true);
+    m_connectButton->setText(QStringLiteral("连接"));
+    m_disconnectButton->setEnabled(false);
+    m_disconnectButton->setText(QStringLiteral("断开"));
+    m_refreshButton->setEnabled(false);
+    m_ipEdit->setEnabled(true);
+    m_ioCountSpin->setEnabled(true);
+    m_modeCombo->setEnabled(true);
+    m_offsetSpin->setEnabled(m_conversionMode == ConversionMode::Offset);
+    m_autoOutputCheck->setEnabled(true);
+
+    m_statusLabel->setText(QStringLiteral("状态：连接已取消"));
+    m_statusLabel->setStyleSheet(QStringLiteral("color: #64748b; font-weight: bold;"));
+    appendLog(QStringLiteral("连接已取消"));
 }
 
 void MainWindow::setConnected(bool connected)
@@ -343,6 +364,9 @@ void MainWindow::appendLog(const QString &message)
 
 QString MainWindow::errorText(int errorCode) const
 {
+    if (errorCode == kZMotionConnectCancelled) {
+        return QStringLiteral("连接已取消");
+    }
     return QStringLiteral("错误码 %1").arg(errorCode);
 }
 
@@ -386,27 +410,40 @@ void MainWindow::onConnectClicked()
     }
 
     m_ignoreConnectResult = false;
+    m_connectCancelled.storeRelease(0);
     m_pendingIp = ip;
+    ++m_connectToken;
+
+    ZMotionConnectRequest request;
+    request.ipAddress = ip;
+    request.cancelled = &m_connectCancelled;
+    request.token = m_connectToken;
+
     setConnecting(true, ip);
     appendLog(QStringLiteral("正在连接 %1 ...").arg(ip));
 
-    m_connectWatcher->setFuture(QtConcurrent::run(zmotionConnectEth, ip));
+    m_connectWatcher->setFuture(QtConcurrent::run(zmotionConnectEth, request));
 }
 
 void MainWindow::onConnectFinished()
 {
     const ZMotionConnectResult result = m_connectWatcher->result();
-    setConnecting(false);
 
-    if (m_ignoreConnectResult) {
+    if (result.token != m_connectToken) {
         if (result.handle) {
             ZAux_Close(result.handle);
         }
-        appendLog(QStringLiteral("连接已取消"));
-        m_statusLabel->setText(QStringLiteral("状态：未连接"));
-        m_statusLabel->setStyleSheet(QStringLiteral("color: #64748b; font-weight: bold;"));
         return;
     }
+
+    if (m_ignoreConnectResult || result.errorCode == kZMotionConnectCancelled) {
+        if (result.handle) {
+            ZAux_Close(result.handle);
+        }
+        return;
+    }
+
+    setConnecting(false);
 
     if (result.errorCode != ERR_OK) {
         showConnectFailed(m_pendingIp, result.errorCode);
@@ -426,8 +463,8 @@ void MainWindow::onConnectFinished()
 void MainWindow::onDisconnectClicked()
 {
     if (m_connecting) {
-        m_ignoreConnectResult = true;
-        appendLog(QStringLiteral("正在取消连接..."));
+        m_connectCancelled.storeRelease(1);
+        cancelConnectingUi();
         return;
     }
 

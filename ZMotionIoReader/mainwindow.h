@@ -9,6 +9,8 @@
 #include <QMainWindow>
 #include <QTimer>
 
+#include <QAtomicInt>
+
 class QCheckBox;
 class QComboBox;
 class QLineEdit;
@@ -46,6 +48,7 @@ private:
     void saveSettings();
     void setConnected(bool connected);
     void setConnecting(bool connecting, const QString &ip = QString());
+    void cancelConnectingUi();
     void showConnectFailed(const QString &ip, int errorCode);
     void updateConversionUi();
     void appendLog(const QString &message);
@@ -79,6 +82,8 @@ private:
     QString m_pendingIp;
     bool m_connecting;
     bool m_ignoreConnectResult;
+    QAtomicInt m_connectCancelled;
+    quint64 m_connectToken;
 
     int m_ioCount;
     ConversionMode m_conversionMode;

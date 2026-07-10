@@ -68,7 +68,7 @@ private:
     bool writeOutputState(uint32_t outputMask);
     uint32_t applyConversion(uint32_t inputMask) const;
     void waitConnectFinished();
-    void updateSerialLedState();
+    void updateConnectionLedState();
     void setConnectionInputsEnabled(bool enabled);
     ZMotionDualConnectRequest buildDualConnectRequest();
 
@@ -93,6 +93,7 @@ private:
     QPushButton *m_disconnectButton;
     QPushButton *m_refreshButton;
     QLabel *m_statusLabel;
+    ConnectionLedWidget *m_zmotionLed;
     ConnectionLedWidget *m_serialLed;
     QPlainTextEdit *m_logEdit;
     IoPanelWidget *m_inputPanel;

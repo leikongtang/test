@@ -60,6 +60,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_disconnectButton(nullptr)
     , m_refreshButton(nullptr)
     , m_statusLabel(nullptr)
+    , m_zmotionLed(nullptr)
     , m_serialLed(nullptr)
     , m_logEdit(nullptr)
     , m_inputPanel(nullptr)
@@ -126,12 +127,16 @@ void MainWindow::setupUi()
     connLayout->addWidget(m_connModeCombo, 0, 1, 1, 2);
 
     m_inputSection = new QWidget(connGroup);
-    QHBoxLayout *inputLayout = new QHBoxLayout(m_inputSection);
+    QGridLayout *inputLayout = new QGridLayout(m_inputSection);
     inputLayout->setContentsMargins(0, 0, 0, 0);
-    inputLayout->addWidget(new QLabel(QStringLiteral("输入 IP："), m_inputSection));
+    inputLayout->addWidget(new QLabel(QStringLiteral("输入 IP："), m_inputSection), 0, 0);
     m_ipEdit = new QLineEdit(QStringLiteral("192.168.0.11"), m_inputSection);
     m_ipEdit->setPlaceholderText(QStringLiteral("例如 192.168.0.11"));
-    inputLayout->addWidget(m_ipEdit, 1);
+    inputLayout->addWidget(m_ipEdit, 0, 1);
+
+    inputLayout->addWidget(new QLabel(QStringLiteral("正运动连接："), m_inputSection), 1, 0);
+    m_zmotionLed = new ConnectionLedWidget(m_inputSection);
+    inputLayout->addWidget(m_zmotionLed, 1, 1);
     connLayout->addWidget(m_inputSection, 1, 0, 1, 3);
 
     m_outputSection = new QWidget(connGroup);
@@ -375,7 +380,7 @@ void MainWindow::closeAllHandles()
     }
     m_inputHandle = nullptr;
     m_outputHandle = nullptr;
-    updateSerialLedState();
+    updateConnectionLedState();
 }
 
 bool MainWindow::isConnected() const
@@ -421,7 +426,7 @@ void MainWindow::setConnecting(bool connecting, const QString &target)
         m_connectButton->setText(QStringLiteral("连接"));
     }
 
-    updateSerialLedState();
+    updateConnectionLedState();
 }
 
 void MainWindow::cancelConnectingUi()
@@ -442,7 +447,7 @@ void MainWindow::cancelConnectingUi()
     m_statusLabel->setText(QStringLiteral("状态：连接已取消"));
     m_statusLabel->setStyleSheet(QStringLiteral("color: #64748b; font-weight: bold;"));
     appendLog(QStringLiteral("连接已取消"));
-    updateSerialLedState();
+    updateConnectionLedState();
 }
 
 void MainWindow::setConnected(bool connected)
@@ -484,7 +489,7 @@ void MainWindow::setConnected(bool connected)
         updateConnectionUi();
     }
 
-    updateSerialLedState();
+    updateConnectionLedState();
 }
 
 void MainWindow::showConnectFailed(const QString &target, int errorCode)
@@ -530,18 +535,26 @@ QString MainWindow::outputAddress() const
     return m_comCombo->currentData().toString();
 }
 
-void MainWindow::updateSerialLedState()
+void MainWindow::updateConnectionLedState()
 {
     const ConnectMode mode = currentConnectMode();
+    const bool usesEthernet = mode == ConnectMode::EthInSerialOut || mode == ConnectMode::Ethernet;
     const bool usesSerial = mode == ConnectMode::EthInSerialOut || mode == ConnectMode::Serial;
-    m_serialLed->setVisibleForSerial(usesSerial);
+
+    m_zmotionLed->setVisible(usesEthernet);
+    m_serialLed->setVisible(usesSerial);
+
+    if (!usesEthernet) {
+        m_zmotionLed->setConnected(false);
+    } else {
+        m_zmotionLed->setConnected(isConnected() && m_inputHandle != nullptr);
+    }
 
     if (!usesSerial) {
         m_serialLed->setConnected(false);
-        return;
+    } else {
+        m_serialLed->setConnected(isConnected() && m_outputHandle != nullptr);
     }
-
-    m_serialLed->setConnected(isConnected() && m_outputHandle != nullptr);
 }
 
 void MainWindow::updateConnectionUi()
@@ -564,7 +577,7 @@ void MainWindow::updateConnectionUi()
         m_autoOutputCheck->setText(QStringLiteral("启用自动转换输出到 IO 板"));
     }
 
-    updateSerialLedState();
+    updateConnectionLedState();
 }
 
 void MainWindow::refreshSerialPortList()

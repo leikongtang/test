@@ -8,9 +8,20 @@
 
 constexpr int kZMotionConnectCancelled = -100;
 
+enum class ConnectType
+{
+    Ethernet = 0,
+    Serial
+};
+
 struct ZMotionConnectRequest
 {
-    QString ipAddress;
+    ConnectType type = ConnectType::Ethernet;
+    QString address;
+    int baudRate = 115200;
+    int dataBits = 8;
+    int parity = 0;
+    int stopBits = 1;
     QAtomicInt *cancelled = nullptr;
     quint64 token = 0;
 };
@@ -22,6 +33,7 @@ struct ZMotionConnectResult
     quint64 token = 0;
 };
 
-ZMotionConnectResult zmotionConnectEth(const ZMotionConnectRequest &request);
+QString connectTypeName(ConnectType type);
+ZMotionConnectResult zmotionConnect(const ZMotionConnectRequest &request);
 
 #endif // ZMOTIONCONNECTOR_H

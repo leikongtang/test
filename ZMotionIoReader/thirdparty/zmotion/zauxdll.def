@@ -1,5 +1,7 @@
 EXPORTS
     ZAux_OpenEth
+    ZAux_OpenCom
+    ZAux_SetComDefaultBaud
     ZAux_Close
     ZAux_Direct_GetIn
     ZAux_Direct_GetInMulti

@@ -18,6 +18,7 @@ class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
 class QLabel;
+class QStackedWidget;
 class IoPanelWidget;
 
 class MainWindow : public QMainWindow
@@ -41,28 +42,43 @@ private slots:
     void onConversionModeChanged(int index);
     void onAutoOutputToggled(bool enabled);
     void onConnectFinished();
+    void onConnectionTypeChanged(int index);
+    void onRefreshPortsClicked();
 
 private:
     void setupUi();
     void loadSettings();
     void saveSettings();
     void setConnected(bool connected);
-    void setConnecting(bool connecting, const QString &ip = QString());
+    void setConnecting(bool connecting, const QString &target = QString());
     void cancelConnectingUi();
-    void showConnectFailed(const QString &ip, int errorCode);
+    void showConnectFailed(const QString &target, int errorCode);
+    void updateConnectionUi();
     void updateConversionUi();
+    void refreshSerialPortList();
     void appendLog(const QString &message);
     QString errorText(int errorCode) const;
+    QString currentConnectTarget() const;
+    ConnectType currentConnectType() const;
     bool pollIoStates();
     bool writeOutputState(uint32_t outputMask);
     uint32_t applyConversion(uint32_t inputMask) const;
     void waitConnectFinished();
+    ZMotionConnectRequest buildConnectRequest();
 
     ZMC_HANDLE m_handle;
     QTimer *m_pollTimer;
     QFutureWatcher<ZMotionConnectResult> *m_connectWatcher;
 
+    QComboBox *m_connTypeCombo;
+    QStackedWidget *m_targetStack;
     QLineEdit *m_ipEdit;
+    QComboBox *m_comCombo;
+    QPushButton *m_refreshPortButton;
+    QComboBox *m_baudCombo;
+    QComboBox *m_parityCombo;
+    QComboBox *m_dataBitsCombo;
+    QComboBox *m_stopBitsCombo;
     QSpinBox *m_ioCountSpin;
     QSpinBox *m_refreshSpin;
     QPushButton *m_connectButton;
@@ -79,7 +95,9 @@ private:
     QSpinBox *m_offsetSpin;
     QLabel *m_conversionDescLabel;
 
-    QString m_pendingIp;
+    QString m_pendingTarget;
+    ConnectType m_pendingConnectType;
+    QString m_savedComPort;
     bool m_connecting;
     bool m_ignoreConnectResult;
     QAtomicInt m_connectCancelled;

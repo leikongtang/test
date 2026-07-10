@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "iopanelwidget.h"
+#include "serialportenumerator.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -16,6 +17,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QtConcurrent>
@@ -23,7 +25,13 @@
 namespace {
 const char kSettingsOrg[] = "LktCodes";
 const char kSettingsApp[] = "ZMotionIoReader";
+const char kKeyConnType[] = "connection/type";
 const char kKeyIp[] = "controller/ip";
+const char kKeyComPort[] = "serial/port";
+const char kKeyBaud[] = "serial/baud";
+const char kKeyParity[] = "serial/parity";
+const char kKeyDataBits[] = "serial/dataBits";
+const char kKeyStopBits[] = "serial/stopBits";
 const char kSettingsIoCount[] = "controller/ioCount";
 const char kKeyRefreshMs[] = "controller/refreshMs";
 const char kKeyAutoOutput[] = "conversion/autoOutput";
@@ -36,7 +44,15 @@ MainWindow::MainWindow(QWidget *parent)
     , m_handle(nullptr)
     , m_pollTimer(new QTimer(this))
     , m_connectWatcher(new QFutureWatcher<ZMotionConnectResult>(this))
+    , m_connTypeCombo(nullptr)
+    , m_targetStack(nullptr)
     , m_ipEdit(nullptr)
+    , m_comCombo(nullptr)
+    , m_refreshPortButton(nullptr)
+    , m_baudCombo(nullptr)
+    , m_parityCombo(nullptr)
+    , m_dataBitsCombo(nullptr)
+    , m_stopBitsCombo(nullptr)
     , m_ioCountSpin(nullptr)
     , m_refreshSpin(nullptr)
     , m_connectButton(nullptr)
@@ -55,6 +71,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_ignoreConnectResult(false)
     , m_connectCancelled(0)
     , m_connectToken(0)
+    , m_pendingConnectType(ConnectType::Ethernet)
     , m_ioCount(32)
     , m_conversionMode(ConversionMode::Direct)
     , m_offset(0)
@@ -65,6 +82,8 @@ MainWindow::MainWindow(QWidget *parent)
     setupUi();
     loadSettings();
     updateConversionUi();
+    updateConnectionUi();
+    refreshSerialPortList();
 
     connect(m_pollTimer, &QTimer::timeout, this, &MainWindow::onPollTimeout);
     connect(m_connectWatcher, &QFutureWatcher<ZMotionConnectResult>::finished,
@@ -72,7 +91,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_pollTimer->setInterval(m_refreshSpin->value());
     setConnected(false);
 
-    appendLog(QStringLiteral("程序已启动，默认正运动 IO 板地址：192.168.0.11"));
+    appendLog(QStringLiteral("程序已启动，支持以太网、实际串口和虚拟串口连接"));
 }
 
 MainWindow::~MainWindow()
@@ -97,24 +116,79 @@ void MainWindow::setupUi()
     QGroupBox *connGroup = new QGroupBox(QStringLiteral("控制器连接"), central);
     QGridLayout *connLayout = new QGridLayout(connGroup);
 
-    connLayout->addWidget(new QLabel(QStringLiteral("IO 板 IP 地址："), connGroup), 0, 0);
-    m_ipEdit = new QLineEdit(QStringLiteral("192.168.0.11"), connGroup);
-    m_ipEdit->setPlaceholderText(QStringLiteral("例如 192.168.0.11"));
-    connLayout->addWidget(m_ipEdit, 0, 1, 1, 2);
+    connLayout->addWidget(new QLabel(QStringLiteral("连接方式："), connGroup), 0, 0);
+    m_connTypeCombo = new QComboBox(connGroup);
+    m_connTypeCombo->addItem(connectTypeName(ConnectType::Ethernet),
+                             static_cast<int>(ConnectType::Ethernet));
+    m_connTypeCombo->addItem(connectTypeName(ConnectType::Serial),
+                             static_cast<int>(ConnectType::Serial));
+    connLayout->addWidget(m_connTypeCombo, 0, 1, 1, 2);
 
-    connLayout->addWidget(new QLabel(QStringLiteral("IO 通道数："), connGroup), 1, 0);
+    m_targetStack = new QStackedWidget(connGroup);
+    QWidget *ethPage = new QWidget(connGroup);
+    QHBoxLayout *ethLayout = new QHBoxLayout(ethPage);
+    ethLayout->setContentsMargins(0, 0, 0, 0);
+    ethLayout->addWidget(new QLabel(QStringLiteral("IP 地址："), ethPage));
+    m_ipEdit = new QLineEdit(QStringLiteral("192.168.0.11"), ethPage);
+    m_ipEdit->setPlaceholderText(QStringLiteral("例如 192.168.0.11"));
+    ethLayout->addWidget(m_ipEdit, 1);
+
+    QWidget *serialPage = new QWidget(connGroup);
+    QGridLayout *serialLayout = new QGridLayout(serialPage);
+    serialLayout->setContentsMargins(0, 0, 0, 0);
+    serialLayout->addWidget(new QLabel(QStringLiteral("串口："), serialPage), 0, 0);
+    m_comCombo = new QComboBox(serialPage);
+    m_refreshPortButton = new QPushButton(QStringLiteral("刷新"), serialPage);
+    QHBoxLayout *comRow = new QHBoxLayout();
+    comRow->addWidget(m_comCombo, 1);
+    comRow->addWidget(m_refreshPortButton);
+    serialLayout->addLayout(comRow, 0, 1);
+
+    serialLayout->addWidget(new QLabel(QStringLiteral("波特率："), serialPage), 1, 0);
+    m_baudCombo = new QComboBox(serialPage);
+    m_baudCombo->addItem(QStringLiteral("115200"), 115200);
+    m_baudCombo->addItem(QStringLiteral("57600"), 57600);
+    m_baudCombo->addItem(QStringLiteral("38400"), 38400);
+    m_baudCombo->addItem(QStringLiteral("19200"), 19200);
+    m_baudCombo->addItem(QStringLiteral("9600"), 9600);
+    serialLayout->addWidget(m_baudCombo, 1, 1);
+
+    serialLayout->addWidget(new QLabel(QStringLiteral("数据位："), serialPage), 2, 0);
+    m_dataBitsCombo = new QComboBox(serialPage);
+    m_dataBitsCombo->addItem(QStringLiteral("8"), 8);
+    m_dataBitsCombo->addItem(QStringLiteral("7"), 7);
+    serialLayout->addWidget(m_dataBitsCombo, 2, 1);
+
+    serialLayout->addWidget(new QLabel(QStringLiteral("校验位："), serialPage), 3, 0);
+    m_parityCombo = new QComboBox(serialPage);
+    m_parityCombo->addItem(QStringLiteral("无"), 0);
+    m_parityCombo->addItem(QStringLiteral("奇校验"), 1);
+    m_parityCombo->addItem(QStringLiteral("偶校验"), 2);
+    serialLayout->addWidget(m_parityCombo, 3, 1);
+
+    serialLayout->addWidget(new QLabel(QStringLiteral("停止位："), serialPage), 4, 0);
+    m_stopBitsCombo = new QComboBox(serialPage);
+    m_stopBitsCombo->addItem(QStringLiteral("1"), 1);
+    m_stopBitsCombo->addItem(QStringLiteral("2"), 2);
+    serialLayout->addWidget(m_stopBitsCombo, 4, 1);
+
+    m_targetStack->addWidget(ethPage);
+    m_targetStack->addWidget(serialPage);
+    connLayout->addWidget(m_targetStack, 1, 0, 1, 3);
+
+    connLayout->addWidget(new QLabel(QStringLiteral("IO 通道数："), connGroup), 2, 0);
     m_ioCountSpin = new QSpinBox(connGroup);
     m_ioCountSpin->setRange(8, 64);
     m_ioCountSpin->setSingleStep(8);
     m_ioCountSpin->setValue(32);
-    connLayout->addWidget(m_ioCountSpin, 1, 1);
+    connLayout->addWidget(m_ioCountSpin, 2, 1);
 
-    connLayout->addWidget(new QLabel(QStringLiteral("刷新间隔 (ms)："), connGroup), 2, 0);
+    connLayout->addWidget(new QLabel(QStringLiteral("刷新间隔 (ms)："), connGroup), 3, 0);
     m_refreshSpin = new QSpinBox(connGroup);
     m_refreshSpin->setRange(50, 2000);
     m_refreshSpin->setSingleStep(50);
     m_refreshSpin->setValue(100);
-    connLayout->addWidget(m_refreshSpin, 2, 1);
+    connLayout->addWidget(m_refreshSpin, 3, 1);
 
     QHBoxLayout *buttonLayout = new QHBoxLayout();
     m_connectButton = new QPushButton(QStringLiteral("连接"), connGroup);
@@ -124,11 +198,11 @@ void MainWindow::setupUi()
     buttonLayout->addWidget(m_disconnectButton);
     buttonLayout->addWidget(m_refreshButton);
     buttonLayout->addStretch();
-    connLayout->addLayout(buttonLayout, 3, 0, 1, 3);
+    connLayout->addLayout(buttonLayout, 4, 0, 1, 3);
 
     m_statusLabel = new QLabel(QStringLiteral("状态：未连接"), connGroup);
     m_statusLabel->setStyleSheet(QStringLiteral("color: #dc2626; font-weight: bold;"));
-    connLayout->addWidget(m_statusLabel, 4, 0, 1, 3);
+    connLayout->addWidget(m_statusLabel, 5, 0, 1, 3);
 
     QGroupBox *convertGroup = new QGroupBox(QStringLiteral("信号转换输出"), central);
     QGridLayout *convertLayout = new QGridLayout(convertGroup);
@@ -191,12 +265,49 @@ void MainWindow::setupUi()
         updateConversionUi();
     });
     connect(m_autoOutputCheck, &QCheckBox::toggled, this, &MainWindow::onAutoOutputToggled);
+    connect(m_connTypeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onConnectionTypeChanged);
+    connect(m_refreshPortButton, &QPushButton::clicked, this, &MainWindow::onRefreshPortsClicked);
 }
 
 void MainWindow::loadSettings()
 {
     QSettings settings(kSettingsOrg, kSettingsApp);
+
+    const int connType = settings.value(kKeyConnType, static_cast<int>(ConnectType::Ethernet)).toInt();
+    const int connTypeIndex = m_connTypeCombo->findData(connType);
+    if (connTypeIndex >= 0) {
+        m_connTypeCombo->setCurrentIndex(connTypeIndex);
+    }
+
     m_ipEdit->setText(settings.value(kKeyIp, QStringLiteral("192.168.0.11")).toString());
+
+    const int baud = settings.value(kKeyBaud, 115200).toInt();
+    const int baudIndex = m_baudCombo->findData(baud);
+    if (baudIndex >= 0) {
+        m_baudCombo->setCurrentIndex(baudIndex);
+    }
+
+    const int parity = settings.value(kKeyParity, 0).toInt();
+    const int parityIndex = m_parityCombo->findData(parity);
+    if (parityIndex >= 0) {
+        m_parityCombo->setCurrentIndex(parityIndex);
+    }
+
+    const int dataBits = settings.value(kKeyDataBits, 8).toInt();
+    const int dataBitsIndex = m_dataBitsCombo->findData(dataBits);
+    if (dataBitsIndex >= 0) {
+        m_dataBitsCombo->setCurrentIndex(dataBitsIndex);
+    }
+
+    const int stopBits = settings.value(kKeyStopBits, 1).toInt();
+    const int stopBitsIndex = m_stopBitsCombo->findData(stopBits);
+    if (stopBitsIndex >= 0) {
+        m_stopBitsCombo->setCurrentIndex(stopBitsIndex);
+    }
+
+    m_savedComPort = settings.value(kKeyComPort).toString();
+
     m_ioCountSpin->setValue(settings.value(kSettingsIoCount, 32).toInt());
     m_refreshSpin->setValue(settings.value(kKeyRefreshMs, 100).toInt());
     m_autoOutputCheck->setChecked(settings.value(kKeyAutoOutput, false).toBool());
@@ -216,7 +327,13 @@ void MainWindow::loadSettings()
 void MainWindow::saveSettings()
 {
     QSettings settings(kSettingsOrg, kSettingsApp);
+    settings.setValue(kKeyConnType, m_connTypeCombo->currentData().toInt());
     settings.setValue(kKeyIp, m_ipEdit->text().trimmed());
+    settings.setValue(kKeyComPort, m_comCombo->currentData().toString());
+    settings.setValue(kKeyBaud, m_baudCombo->currentData().toInt());
+    settings.setValue(kKeyParity, m_parityCombo->currentData().toInt());
+    settings.setValue(kKeyDataBits, m_dataBitsCombo->currentData().toInt());
+    settings.setValue(kKeyStopBits, m_stopBitsCombo->currentData().toInt());
     settings.setValue(kSettingsIoCount, m_ioCountSpin->value());
     settings.setValue(kKeyRefreshMs, m_refreshSpin->value());
     settings.setValue(kKeyAutoOutput, m_autoOutputCheck->isChecked());
@@ -242,12 +359,26 @@ void MainWindow::waitConnectFinished()
     }
 }
 
-void MainWindow::setConnecting(bool connecting, const QString &ip)
+void MainWindow::setConnecting(bool connecting, const QString &target)
 {
     m_connecting = connecting;
     m_connectButton->setEnabled(!connecting);
     m_refreshButton->setEnabled(!connecting && m_handle != nullptr);
-    m_ipEdit->setEnabled(!connecting && m_handle == nullptr);
+    m_connTypeCombo->setEnabled(!connecting && m_handle == nullptr);
+    m_ipEdit->setEnabled(!connecting && m_handle == nullptr
+                         && currentConnectType() == ConnectType::Ethernet);
+    m_comCombo->setEnabled(!connecting && m_handle == nullptr
+                           && currentConnectType() == ConnectType::Serial);
+    m_refreshPortButton->setEnabled(!connecting && m_handle == nullptr
+                                    && currentConnectType() == ConnectType::Serial);
+    m_baudCombo->setEnabled(!connecting && m_handle == nullptr
+                            && currentConnectType() == ConnectType::Serial);
+    m_dataBitsCombo->setEnabled(!connecting && m_handle == nullptr
+                                && currentConnectType() == ConnectType::Serial);
+    m_parityCombo->setEnabled(!connecting && m_handle == nullptr
+                              && currentConnectType() == ConnectType::Serial);
+    m_stopBitsCombo->setEnabled(!connecting && m_handle == nullptr
+                                && currentConnectType() == ConnectType::Serial);
     m_ioCountSpin->setEnabled(!connecting && m_handle == nullptr);
     m_modeCombo->setEnabled(!connecting);
     m_offsetSpin->setEnabled(!connecting && m_conversionMode == ConversionMode::Offset);
@@ -257,7 +388,7 @@ void MainWindow::setConnecting(bool connecting, const QString &ip)
         m_disconnectButton->setEnabled(true);
         m_disconnectButton->setText(QStringLiteral("取消连接"));
         m_connectButton->setText(QStringLiteral("连接中..."));
-        m_statusLabel->setText(QStringLiteral("状态：正在连接 %1 ...").arg(ip));
+        m_statusLabel->setText(QStringLiteral("状态：正在连接 %1 ...").arg(target));
         m_statusLabel->setStyleSheet(QStringLiteral("color: #d97706; font-weight: bold;"));
     } else {
         m_disconnectButton->setText(QStringLiteral("断开"));
@@ -275,7 +406,14 @@ void MainWindow::cancelConnectingUi()
     m_disconnectButton->setEnabled(false);
     m_disconnectButton->setText(QStringLiteral("断开"));
     m_refreshButton->setEnabled(false);
-    m_ipEdit->setEnabled(true);
+    m_connTypeCombo->setEnabled(true);
+    m_ipEdit->setEnabled(currentConnectType() == ConnectType::Ethernet);
+    m_comCombo->setEnabled(currentConnectType() == ConnectType::Serial);
+    m_refreshPortButton->setEnabled(currentConnectType() == ConnectType::Serial);
+    m_baudCombo->setEnabled(currentConnectType() == ConnectType::Serial);
+    m_dataBitsCombo->setEnabled(currentConnectType() == ConnectType::Serial);
+    m_parityCombo->setEnabled(currentConnectType() == ConnectType::Serial);
+    m_stopBitsCombo->setEnabled(currentConnectType() == ConnectType::Serial);
     m_ioCountSpin->setEnabled(true);
     m_modeCombo->setEnabled(true);
     m_offsetSpin->setEnabled(m_conversionMode == ConversionMode::Offset);
@@ -293,7 +431,14 @@ void MainWindow::setConnected(bool connected)
     m_disconnectButton->setText(QStringLiteral("断开"));
     m_connectButton->setText(QStringLiteral("连接"));
     m_refreshButton->setEnabled(connected);
-    m_ipEdit->setEnabled(!connected);
+    m_connTypeCombo->setEnabled(!connected);
+    m_ipEdit->setEnabled(!connected && currentConnectType() == ConnectType::Ethernet);
+    m_comCombo->setEnabled(!connected && currentConnectType() == ConnectType::Serial);
+    m_refreshPortButton->setEnabled(!connected && currentConnectType() == ConnectType::Serial);
+    m_baudCombo->setEnabled(!connected && currentConnectType() == ConnectType::Serial);
+    m_dataBitsCombo->setEnabled(!connected && currentConnectType() == ConnectType::Serial);
+    m_parityCombo->setEnabled(!connected && currentConnectType() == ConnectType::Serial);
+    m_stopBitsCombo->setEnabled(!connected && currentConnectType() == ConnectType::Serial);
     m_ioCountSpin->setEnabled(!connected);
     m_modeCombo->setEnabled(true);
     m_offsetSpin->setEnabled(m_conversionMode == ConversionMode::Offset);
@@ -301,7 +446,7 @@ void MainWindow::setConnected(bool connected)
     m_connecting = false;
 
     if (connected) {
-        m_statusLabel->setText(QStringLiteral("状态：已连接 %1").arg(m_ipEdit->text().trimmed()));
+        m_statusLabel->setText(QStringLiteral("状态：已连接 %1").arg(m_pendingTarget));
         m_statusLabel->setStyleSheet(QStringLiteral("color: #15803d; font-weight: bold;"));
         m_pollTimer->start();
     } else {
@@ -314,24 +459,113 @@ void MainWindow::setConnected(bool connected)
         m_lastInputState = 0;
         m_lastConvertedState = 0;
         m_lastOutputState = 0;
+        updateConnectionUi();
     }
 }
 
-void MainWindow::showConnectFailed(const QString &ip, int errorCode)
+void MainWindow::showConnectFailed(const QString &target, int errorCode)
 {
     setConnected(false);
-    m_statusLabel->setText(QStringLiteral("状态：连接失败（%1）").arg(ip));
+    m_statusLabel->setText(QStringLiteral("状态：连接失败（%1）").arg(target));
     m_statusLabel->setStyleSheet(QStringLiteral("color: #dc2626; font-weight: bold;"));
 
-    appendLog(QStringLiteral("连接失败：无法连接到 %1，%2").arg(ip, errorText(errorCode)));
+    appendLog(QStringLiteral("连接失败：无法连接到 %1，%2").arg(target, errorText(errorCode)));
+
+    QString hint;
+    if (m_pendingConnectType == ConnectType::Ethernet) {
+        hint = QStringLiteral("请检查：\n"
+                              "1. IP 地址是否正确\n"
+                              "2. 网线是否已连接\n"
+                              "3. PC 与 IO 板是否在同一网段");
+    } else {
+        hint = QStringLiteral("请检查：\n"
+                              "1. 串口是否被其他程序占用\n"
+                              "2. 波特率等参数是否正确\n"
+                              "3. 虚拟串口配对是否正常（com0com 等）");
+    }
+
     QMessageBox::critical(this,
                           QStringLiteral("连接失败"),
-                          QStringLiteral("连接失败，无法连接到 IO 板 %1。\n\n请检查：\n"
-                                         "1. IP 地址是否正确\n"
-                                         "2. 网线是否已连接\n"
-                                         "3. PC 与 IO 板是否在同一网段\n\n"
-                                         "%2")
-                              .arg(ip, errorText(errorCode)));
+                          QStringLiteral("连接失败，无法连接到 %1。\n\n%2\n\n%3")
+                              .arg(target, hint, errorText(errorCode)));
+}
+
+ConnectType MainWindow::currentConnectType() const
+{
+    return static_cast<ConnectType>(m_connTypeCombo->currentData().toInt());
+}
+
+QString MainWindow::currentConnectTarget() const
+{
+    if (currentConnectType() == ConnectType::Ethernet) {
+        return m_ipEdit->text().trimmed();
+    }
+    return m_comCombo->currentData().toString();
+}
+
+void MainWindow::updateConnectionUi()
+{
+    const ConnectType type = currentConnectType();
+    m_targetStack->setCurrentIndex(type == ConnectType::Ethernet ? 0 : 1);
+}
+
+void MainWindow::refreshSerialPortList()
+{
+    const QString currentPort = m_comCombo->currentData().toString();
+    m_comCombo->clear();
+
+    const auto ports = listAvailableSerialPorts();
+    if (ports.isEmpty()) {
+        m_comCombo->addItem(QStringLiteral("未检测到串口"), QString());
+        return;
+    }
+
+    for (const SerialPortEntry &entry : ports) {
+        QString label = entry.portName;
+        if (entry.isVirtual) {
+            label += QStringLiteral(" [虚拟串口]");
+        }
+        if (!entry.description.isEmpty()) {
+            label += QStringLiteral(" - %1").arg(entry.description);
+        }
+        m_comCombo->addItem(label, entry.portName);
+    }
+
+    const QString restorePort = !m_savedComPort.isEmpty() ? m_savedComPort : currentPort;
+    const int index = m_comCombo->findData(restorePort);
+    if (index >= 0) {
+        m_comCombo->setCurrentIndex(index);
+    }
+    m_savedComPort.clear();
+}
+
+ZMotionConnectRequest MainWindow::buildConnectRequest()
+{
+    ZMotionConnectRequest request;
+    request.type = currentConnectType();
+    request.address = currentConnectTarget();
+    request.baudRate = m_baudCombo->currentData().toInt();
+    request.dataBits = m_dataBitsCombo->currentData().toInt();
+    request.parity = m_parityCombo->currentData().toInt();
+    request.stopBits = m_stopBitsCombo->currentData().toInt();
+    request.cancelled = &m_connectCancelled;
+    request.token = m_connectToken;
+    return request;
+}
+
+void MainWindow::onConnectionTypeChanged(int index)
+{
+    Q_UNUSED(index)
+    updateConnectionUi();
+    if (!m_connecting && !m_handle) {
+        setConnected(false);
+    }
+}
+
+void MainWindow::onRefreshPortsClicked()
+{
+    refreshSerialPortList();
+    appendLog(QStringLiteral("已刷新串口列表，共 %1 个端口").arg(m_comCombo->count()));
 }
 
 void MainWindow::updateConversionUi()
@@ -393,14 +627,22 @@ bool MainWindow::writeOutputState(uint32_t outputMask)
 
 void MainWindow::onConnectClicked()
 {
-    const QString ip = m_ipEdit->text().trimmed();
-    if (ip.isEmpty()) {
+    const ConnectType type = currentConnectType();
+    const QString target = currentConnectTarget();
+    if (target.isEmpty()) {
         m_statusLabel->setText(QStringLiteral("状态：连接失败"));
         m_statusLabel->setStyleSheet(QStringLiteral("color: #dc2626; font-weight: bold;"));
-        appendLog(QStringLiteral("连接失败：未输入 IO 板 IP 地址"));
-        QMessageBox::critical(this,
-                              QStringLiteral("连接失败"),
-                              QStringLiteral("连接失败，请输入 IO 板 IP 地址。"));
+        if (type == ConnectType::Ethernet) {
+            appendLog(QStringLiteral("连接失败：未输入 IP 地址"));
+            QMessageBox::critical(this,
+                                  QStringLiteral("连接失败"),
+                                  QStringLiteral("连接失败，请输入 IO 板 IP 地址。"));
+        } else {
+            appendLog(QStringLiteral("连接失败：未选择串口"));
+            QMessageBox::critical(this,
+                                  QStringLiteral("连接失败"),
+                                  QStringLiteral("连接失败，请选择串口。可点击「刷新」重新扫描串口。"));
+        }
         return;
     }
 
@@ -411,18 +653,17 @@ void MainWindow::onConnectClicked()
 
     m_ignoreConnectResult = false;
     m_connectCancelled.storeRelease(0);
-    m_pendingIp = ip;
+    m_pendingTarget = target;
+    m_pendingConnectType = type;
     ++m_connectToken;
 
-    ZMotionConnectRequest request;
-    request.ipAddress = ip;
-    request.cancelled = &m_connectCancelled;
-    request.token = m_connectToken;
+    const ZMotionConnectRequest request = buildConnectRequest();
+    const QString typeLabel = connectTypeName(type);
 
-    setConnecting(true, ip);
-    appendLog(QStringLiteral("正在连接 %1 ...").arg(ip));
+    setConnecting(true, QStringLiteral("%1 %2").arg(typeLabel, target));
+    appendLog(QStringLiteral("正在通过%1连接 %2 ...").arg(typeLabel, target));
 
-    m_connectWatcher->setFuture(QtConcurrent::run(zmotionConnectEth, request));
+    m_connectWatcher->setFuture(QtConcurrent::run(zmotionConnect, request));
 }
 
 void MainWindow::onConnectFinished()
@@ -446,14 +687,15 @@ void MainWindow::onConnectFinished()
     setConnecting(false);
 
     if (result.errorCode != ERR_OK) {
-        showConnectFailed(m_pendingIp, result.errorCode);
+        showConnectFailed(m_pendingTarget, result.errorCode);
         return;
     }
 
     m_handle = result.handle;
     m_ioCount = m_ioCountSpin->value();
-    appendLog(QStringLiteral("已连接到 %1，IO 通道数 %2，转换模式：%3")
-                  .arg(m_pendingIp)
+    appendLog(QStringLiteral("已通过%1连接到 %2，IO 通道数 %3，转换模式：%4")
+                  .arg(connectTypeName(m_pendingConnectType))
+                  .arg(m_pendingTarget)
                   .arg(m_ioCount)
                   .arg(SignalConverter::modeName(m_conversionMode)));
     setConnected(true);

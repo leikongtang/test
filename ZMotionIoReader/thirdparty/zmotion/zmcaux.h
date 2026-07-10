@@ -18,6 +18,8 @@ extern "C" {
 #endif
 
 int32_t ZMCAUX_API ZAux_OpenEth(char *ipaddr, ZMC_HANDLE *phandle);
+int32_t ZMCAUX_API ZAux_OpenCom(char *comname, ZMC_HANDLE *phandle);
+int32_t ZMCAUX_API ZAux_SetComDefaultBaud(int baudRate, int byteSize, int parity, int stopBits);
 int32_t ZMCAUX_API ZAux_Close(ZMC_HANDLE handle);
 
 int32_t ZMCAUX_API ZAux_Direct_GetIn(ZMC_HANDLE handle, int ionum, uint32_t *piValue);

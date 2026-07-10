@@ -351,9 +351,31 @@ void MainWindow::saveSettings()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    QString message;
+    if (m_connecting) {
+        message = QStringLiteral("正在连接控制器，确定要关闭程序吗？");
+    } else if (isConnected()) {
+        message = QStringLiteral("当前已与控制器保持连接，关闭程序将断开连接。\n\n确定要退出吗？");
+    } else {
+        message = QStringLiteral("确定要关闭程序吗？");
+    }
+
+    const QMessageBox::StandardButton reply = QMessageBox::question(
+        this,
+        QStringLiteral("退出确认"),
+        message,
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+
+    if (reply != QMessageBox::Yes) {
+        event->ignore();
+        return;
+    }
+
     saveSettings();
     waitConnectFinished();
     closeAllHandles();
+    event->accept();
     QMainWindow::closeEvent(event);
 }
 

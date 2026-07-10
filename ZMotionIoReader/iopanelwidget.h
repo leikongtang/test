@@ -4,6 +4,7 @@
 #include <QWidget>
 
 class QLabel;
+class QGroupBox;
 
 class IoPanelWidget : public QWidget
 {
@@ -14,9 +15,12 @@ public:
 
     void setChannelState(int channel, bool active);
     void setAllStates(uint32_t bitmask);
+    void setTitle(const QString &title);
 
 private:
     void setupUi(const QString &title);
+
+    QGroupBox *m_groupBox;
 
     QVector<QLabel *> m_indicators;
     int m_channelCount;

@@ -18,7 +18,7 @@ class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
 class QLabel;
-class QStackedWidget;
+class QWidget;
 class IoPanelWidget;
 
 class MainWindow : public QMainWindow
@@ -42,7 +42,7 @@ private slots:
     void onConversionModeChanged(int index);
     void onAutoOutputToggled(bool enabled);
     void onConnectFinished();
-    void onConnectionTypeChanged(int index);
+    void onConnectionModeChanged(int index);
     void onRefreshPortsClicked();
 
 private:
@@ -58,20 +58,26 @@ private:
     void refreshSerialPortList();
     void appendLog(const QString &message);
     QString errorText(int errorCode) const;
-    QString currentConnectTarget() const;
-    ConnectType currentConnectType() const;
+    QString inputAddress() const;
+    QString outputAddress() const;
+    ConnectMode currentConnectMode() const;
+    bool isConnected() const;
+    void closeAllHandles();
     bool pollIoStates();
     bool writeOutputState(uint32_t outputMask);
     uint32_t applyConversion(uint32_t inputMask) const;
     void waitConnectFinished();
-    ZMotionConnectRequest buildConnectRequest();
+    void setConnectionInputsEnabled(bool enabled);
+    ZMotionDualConnectRequest buildDualConnectRequest();
 
-    ZMC_HANDLE m_handle;
+    ZMC_HANDLE m_inputHandle;
+    ZMC_HANDLE m_outputHandle;
     QTimer *m_pollTimer;
-    QFutureWatcher<ZMotionConnectResult> *m_connectWatcher;
+    QFutureWatcher<ZMotionDualConnectResult> *m_connectWatcher;
 
-    QComboBox *m_connTypeCombo;
-    QStackedWidget *m_targetStack;
+    QComboBox *m_connModeCombo;
+    QWidget *m_inputSection;
+    QWidget *m_outputSection;
     QLineEdit *m_ipEdit;
     QComboBox *m_comCombo;
     QPushButton *m_refreshPortButton;
@@ -95,8 +101,7 @@ private:
     QSpinBox *m_offsetSpin;
     QLabel *m_conversionDescLabel;
 
-    QString m_pendingTarget;
-    ConnectType m_pendingConnectType;
+    ConnectMode m_pendingConnectMode;
     QString m_savedComPort;
     bool m_connecting;
     bool m_ignoreConnectResult;

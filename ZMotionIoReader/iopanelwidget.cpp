@@ -14,19 +14,20 @@ const QString kInactiveStyle = QStringLiteral(
 IoPanelWidget::IoPanelWidget(const QString &title, int channelCount, QWidget *parent)
     : QWidget(parent)
     , m_channelCount(channelCount)
+    , m_groupBox(nullptr)
 {
     setupUi(title);
 }
 
 void IoPanelWidget::setupUi(const QString &title)
 {
-    QGroupBox *group = new QGroupBox(title, this);
-    QGridLayout *grid = new QGridLayout(group);
+    m_groupBox = new QGroupBox(title, this);
+    QGridLayout *grid = new QGridLayout(m_groupBox);
     grid->setSpacing(6);
 
     const int columns = 8;
     for (int i = 0; i < m_channelCount; ++i) {
-        QLabel *label = new QLabel(QString::number(i), group);
+        QLabel *label = new QLabel(QString::number(i), m_groupBox);
         label->setAlignment(Qt::AlignCenter);
         label->setFixedSize(42, 28);
         label->setStyleSheet(kInactiveStyle);
@@ -36,7 +37,14 @@ void IoPanelWidget::setupUi(const QString &title)
 
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(group);
+    layout->addWidget(m_groupBox);
+}
+
+void IoPanelWidget::setTitle(const QString &title)
+{
+    if (m_groupBox) {
+        m_groupBox->setTitle(title);
+    }
 }
 
 void IoPanelWidget::setChannelState(int channel, bool active)

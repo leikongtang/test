@@ -4,7 +4,7 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 CONFIG += c++11
 TEMPLATE = app
 TARGET = ZMotionIoReader
-VERSION = 1.2.0
+VERSION = 1.3.0
 
 DEFINES += APP_VERSION=\\\"$$VERSION\\\"
 

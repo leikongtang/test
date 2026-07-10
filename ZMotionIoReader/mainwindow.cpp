@@ -60,6 +60,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_disconnectButton(nullptr)
     , m_refreshButton(nullptr)
     , m_statusLabel(nullptr)
+    , m_serialLed(nullptr)
     , m_logEdit(nullptr)
     , m_inputPanel(nullptr)
     , m_convertedPanel(nullptr)
@@ -171,7 +172,14 @@ void MainWindow::setupUi()
     m_stopBitsCombo->addItem(QStringLiteral("1"), 1);
     m_stopBitsCombo->addItem(QStringLiteral("2"), 2);
     serialLayout->addWidget(m_stopBitsCombo, 4, 1);
+
+    serialLayout->addWidget(new QLabel(QStringLiteral("虚拟串口连接："), m_outputSection), 5, 0);
+    m_serialLed = new ConnectionLedWidget(m_outputSection);
+    serialLayout->addWidget(m_serialLed, 5, 1);
+
     connLayout->addWidget(m_outputSection, 2, 0, 1, 3);
+
+    connLayout->addWidget(new QLabel(QStringLiteral("IO 通道数："), connGroup), 3, 0);
     m_ioCountSpin = new QSpinBox(connGroup);
     m_ioCountSpin->setRange(8, 64);
     m_ioCountSpin->setSingleStep(8);
@@ -367,6 +375,7 @@ void MainWindow::closeAllHandles()
     }
     m_inputHandle = nullptr;
     m_outputHandle = nullptr;
+    updateSerialLedState();
 }
 
 bool MainWindow::isConnected() const
@@ -411,6 +420,8 @@ void MainWindow::setConnecting(bool connecting, const QString &target)
         m_disconnectButton->setText(QStringLiteral("断开"));
         m_connectButton->setText(QStringLiteral("连接"));
     }
+
+    updateSerialLedState();
 }
 
 void MainWindow::cancelConnectingUi()
@@ -431,6 +442,7 @@ void MainWindow::cancelConnectingUi()
     m_statusLabel->setText(QStringLiteral("状态：连接已取消"));
     m_statusLabel->setStyleSheet(QStringLiteral("color: #64748b; font-weight: bold;"));
     appendLog(QStringLiteral("连接已取消"));
+    updateSerialLedState();
 }
 
 void MainWindow::setConnected(bool connected)
@@ -471,6 +483,8 @@ void MainWindow::setConnected(bool connected)
         m_lastOutputState = 0;
         updateConnectionUi();
     }
+
+    updateSerialLedState();
 }
 
 void MainWindow::showConnectFailed(const QString &target, int errorCode)
@@ -516,6 +530,20 @@ QString MainWindow::outputAddress() const
     return m_comCombo->currentData().toString();
 }
 
+void MainWindow::updateSerialLedState()
+{
+    const ConnectMode mode = currentConnectMode();
+    const bool usesSerial = mode == ConnectMode::EthInSerialOut || mode == ConnectMode::Serial;
+    m_serialLed->setVisibleForSerial(usesSerial);
+
+    if (!usesSerial) {
+        m_serialLed->setConnected(false);
+        return;
+    }
+
+    m_serialLed->setConnected(isConnected() && m_outputHandle != nullptr);
+}
+
 void MainWindow::updateConnectionUi()
 {
     const ConnectMode mode = currentConnectMode();
@@ -535,6 +563,8 @@ void MainWindow::updateConnectionUi()
         m_outputPanel->setTitle(QStringLiteral("数字输出 OUT（实际）"));
         m_autoOutputCheck->setText(QStringLiteral("启用自动转换输出到 IO 板"));
     }
+
+    updateSerialLedState();
 }
 
 void MainWindow::refreshSerialPortList()

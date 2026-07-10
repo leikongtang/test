@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include "signalconverter.h"
+#include "connectionledwidget.h"
 #include "zmotionconnector.h"
 #include "zmcaux.h"
 
@@ -67,6 +68,7 @@ private:
     bool writeOutputState(uint32_t outputMask);
     uint32_t applyConversion(uint32_t inputMask) const;
     void waitConnectFinished();
+    void updateSerialLedState();
     void setConnectionInputsEnabled(bool enabled);
     ZMotionDualConnectRequest buildDualConnectRequest();
 
@@ -91,6 +93,7 @@ private:
     QPushButton *m_disconnectButton;
     QPushButton *m_refreshButton;
     QLabel *m_statusLabel;
+    ConnectionLedWidget *m_serialLed;
     QPlainTextEdit *m_logEdit;
     IoPanelWidget *m_inputPanel;
     IoPanelWidget *m_convertedPanel;

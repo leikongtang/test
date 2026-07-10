@@ -4,7 +4,7 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 CONFIG += c++11
 TEMPLATE = app
 TARGET = ZMotionIoReader
-VERSION = 1.3.0
+VERSION = 1.3.1
 
 DEFINES += APP_VERSION=\\\"$$VERSION\\\"
 
@@ -14,14 +14,16 @@ SOURCES += \
     iopanelwidget.cpp \
     signalconverter.cpp \
     zmotionconnector.cpp \
-    serialportenumerator.cpp
+    serialportenumerator.cpp \
+    connectionledwidget.cpp
 
 HEADERS += \
     mainwindow.h \
     iopanelwidget.h \
     signalconverter.h \
     zmotionconnector.h \
-    serialportenumerator.h
+    serialportenumerator.h \
+    connectionledwidget.h
 
 ZMotionPath = $$PWD/thirdparty/zmotion
 INCLUDEPATH += $$ZMotionPath
